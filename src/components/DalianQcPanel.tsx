@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, DatePicker, Descriptions, Form, Input, Modal, Space, Table, Tag, notification } from 'antd'
+import { Button, Card, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, notification } from 'antd'
 import dayjs, { Dayjs } from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import styles from '../pages/WorkflowPages.module.css'
@@ -16,7 +16,7 @@ import {
 import { runBatchCertificateExport } from '../utils/certificateBatchExport'
 import { runSnapshotBatchExport } from '../utils/snapshotBatchExport'
 import CertificateExportProgress from './CertificateExportProgress'
-import { CHEM_FIELDS, DALIAN_MECH_COLUMNS } from './qcConstants'
+import { CHEM_FIELDS, DALIAN_MECH_COLUMNS, ORDER_STATUS_OPTIONS } from './qcConstants'
 import {
   QcBackToListButton,
   buildQcListColumns,
@@ -118,12 +118,12 @@ export default function DalianQcPanel({
     setSavedCertNo,
   }
 
-  const loadListByFilters = async (orderNo = '', materialNo = '') => {
-    const res = await fetch(
-      apiUrl(
-        `/api/v1/workflow/qc/list?region=dalian&order_no=${encodeURIComponent(orderNo)}&material_no=${encodeURIComponent(materialNo)}`
-      )
-    )
+  const loadListByFilters = async (orderNo = '', materialNo = '', status = '') => {
+    const qs = new URLSearchParams({ region: 'dalian' })
+    if (orderNo) qs.set('order_no', orderNo)
+    if (materialNo) qs.set('material_no', materialNo)
+    if (status) qs.set('status', status)
+    const res = await fetch(apiUrl(`/api/v1/workflow/qc/list?${qs.toString()}`))
     const data = await res.json()
     if (!res.ok) return message.error(data.detail || '加载失败')
     setListRows(data.rows || [])
@@ -134,18 +134,19 @@ export default function DalianQcPanel({
   }
 
   const querySnapshots = async () => {
-    const values = await form.validateFields(['query_order_no', 'query_material_no'])
+    const values = await form.validateFields(['query_order_no', 'query_material_no', 'query_status'])
     const orderNo = values.query_order_no || ''
     const materialNo = values.query_material_no || ''
-    if (!orderNo && !materialNo) {
-      message.warning('请至少填写订单号或物料号')
+    const status = values.query_status || ''
+    if (!orderNo && !materialNo && !status) {
+      message.warning('请至少填写订单号、物料号或状态')
       return
     }
-    const res = await fetch(
-      apiUrl(
-        `/api/v1/workflow/qc/snapshots?region=dalian&order_no=${encodeURIComponent(orderNo)}&material_no=${encodeURIComponent(materialNo)}`
-      )
-    )
+    const qs = new URLSearchParams({ region: 'dalian' })
+    if (orderNo) qs.set('order_no', orderNo)
+    if (materialNo) qs.set('material_no', materialNo)
+    if (status) qs.set('status', status)
+    const res = await fetch(apiUrl(`/api/v1/workflow/qc/snapshots?${qs.toString()}`))
     const data = await res.json()
     if (!res.ok) return message.error(data.detail || '查询失败')
     setListRows(data.rows || [])
@@ -155,8 +156,8 @@ export default function DalianQcPanel({
   }
 
   const loadList = async () => {
-    const values = await form.validateFields(['query_order_no', 'query_material_no'])
-    await loadListByFilters(values.query_order_no || '', values.query_material_no || '')
+    const values = await form.validateFields(['query_order_no', 'query_material_no', 'query_status'])
+    await loadListByFilters(values.query_order_no || '', values.query_material_no || '', values.query_status || '')
   }
 
   const applyDetailData = (data: Record<string, any>, order_no: string, material_no: string, confirmed: boolean) => {
@@ -658,23 +659,41 @@ export default function DalianQcPanel({
     return (
       <>
         <Form form={form} layout="vertical">
-          <Space wrap>
+          <Space wrap align="start" className={styles.qcListFilterRow}>
             <Form.Item name="query_order_no" label="订单号">
               <Input />
             </Form.Item>
             <Form.Item name="query_material_no" label="物料号">
               <Input />
             </Form.Item>
-            <Button type="primary" onClick={loadList}>加载待质检列表</Button>
-            <Button type="primary" className={styles.qcQueryButton} onClick={querySnapshots}>查询</Button>
+            <Form.Item name="query_status" label="状态">
+              <Select
+                allowClear
+                placeholder="全部（默认排除开始/分割/加工）"
+                style={{ minWidth: 160 }}
+                options={ORDER_STATUS_OPTIONS.map((v) => ({ value: v, label: v }))}
+              />
+            </Form.Item>
+            <Form.Item label=" " colon={false}>
+              <Space wrap>
+                <Button type="primary" onClick={loadList}>加载待质检列表</Button>
+                <Button type="primary" className={styles.qcQueryButton} onClick={querySnapshots}>查询</Button>
+              </Space>
+            </Form.Item>
+          </Space>
+          <Space wrap align="center" className={styles.qcListActionRow}>
             <Button
+              type="primary"
+              className={styles.qcSelectAllButton}
               onClick={() =>
                 setSelectedListKeys(listRows.map((row) => qcListRowKey(row, listMode) as string | number))
               }
             >
               全选
             </Button>
-            <Button onClick={() => setSelectedListKeys([])}>清空</Button>
+            <Button type="primary" className={styles.qcSelectAllButton} onClick={() => setSelectedListKeys([])}>
+              清空
+            </Button>
             {listMode === 'pending' ? (
               <>
                 <DatePicker
@@ -691,7 +710,7 @@ export default function DalianQcPanel({
             ) : (
               <Tag color="orange">已生成质保书查询结果</Tag>
             )}
-            <Button type="primary" loading={exporting} onClick={batchGenerateCertificates}>
+            <Button type="primary" className={styles.qcQueryButton} loading={exporting} onClick={batchGenerateCertificates}>
               {listMode === 'generated' ? '批量重生成质保书' : '批量生成质保书'}
             </Button>
           </Space>

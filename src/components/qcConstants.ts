@@ -1,3 +1,18 @@
+/** 与 order_details.order_status 一致，供质检列表筛选 */
+export const ORDER_STATUS_OPTIONS = [
+  '开始',
+  '分割',
+  '加工',
+  '入库',
+  '质检',
+  '再加工',
+  '包装',
+  '装箱',
+  '打包',
+  '发货',
+  '完成',
+] as const
+
 export const CHEM_FIELDS = [
   { key: 'C', label: '碳 C' },
   { key: 'Mn', label: '锰 Mn' },

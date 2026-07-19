@@ -74,6 +74,25 @@
   border-color: #ffa940;
 }
 
+.qcListFilterRow {
+  width: 100%;
+}
+
+.qcListActionRow {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.qcSelectAllButton:global(.ant-btn-primary) {
+  background: #52c41a;
+  border-color: #52c41a;
+}
+
+.qcSelectAllButton:global(.ant-btn-primary:not(:disabled):hover) {
+  background: #73d13d;
+  border-color: #73d13d;
+}
+
 .qcGeneratedRow :global(> td) {
   background: #fff0f6 !important;
 }
