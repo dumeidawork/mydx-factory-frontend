@@ -1,0 +1,58 @@
+{
+  "app": {
+    "name": "Mingyuan Digital Management System",
+    "shortName": "Mingyuan ERP"
+  },
+  "common": {
+    "login": "Login",
+    "logout": "Logout",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "save": "Save",
+    "search": "Search",
+    "language": "Language"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "contracts": "Contracts & Orders",
+    "heatTreatment": "Heat Treatment & Testing",
+    "production": "Product Archiving",
+    "finance": "Finance",
+    "qc": "Quality Inspection",
+    "packing": "Packing",
+    "shippingMarks": "Packing & Shipping"
+  },
+  "login": {
+    "title": "Mingyuan ERP Login",
+    "placeholderUsername": "Enter username",
+    "placeholderPassword": "Enter password",
+    "rememberMe": "Remember me"
+  },
+  "documents": {
+    "title": "Document Center (QC/Packing/Mark)",
+    "documentType": "Document Type",
+    "qualityCertificate": "Quality Certificate",
+    "packingList": "Packing List",
+    "shippingMark": "Shipping Mark",
+    "language": "Language",
+    "orderNo": "Order No.",
+    "clientName": "Client",
+    "productName": "Product",
+    "specification": "Specification",
+    "quantity": "Quantity",
+    "boxNo": "Box No.",
+    "destinationPort": "Destination Port",
+    "preview": "Preview",
+    "export": "Export",
+    "download": "Download",
+    "previewResult": "Preview Result",
+    "emptyPreview": "No preview content",
+    "previewSuccess": "Preview generated",
+    "previewFailed": "Preview failed",
+    "exportSuccess": "Export created",
+    "exportFailed": "Export failed",
+    "exportCreated": "Export job created"
+  }
+}

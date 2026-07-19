@@ -1,0 +1,168 @@
+.pageCard {
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.pageCard :global(.ant-card-head) {
+  background: linear-gradient(90deg, #f8fbff 0%, #eef5ff 100%);
+}
+
+.sectionCard {
+  border-radius: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #e8eef8;
+}
+
+/* 大连发货明细表：左右固定列层级（勿改 header position，否则会破坏右侧固定列） */
+.dalianShippingTable :global(.ant-table-cell-fix-left-last::after),
+.dalianShippingTable :global(.ant-table-cell-fix-right-first::after) {
+  box-shadow: none;
+}
+
+.dalianShippingTable :global(.ant-table-cell-fix-left),
+.dalianShippingTable :global(.ant-table-cell-fix-right) {
+  background: #fff;
+}
+
+.dalianShippingTable :global(.ant-table-thead > tr > th) {
+  background: #e8f4ff !important;
+  color: #1f3a5f;
+}
+
+.dalianShippingTable :global(.ant-table-thead > tr > th.ant-table-cell-fix-left),
+.dalianShippingTable :global(.ant-table-thead > tr > th.ant-table-cell-fix-right) {
+  z-index: 6;
+  background: #e8f4ff !important;
+}
+
+.dalianShippingTable :global(.ant-table-tbody > tr > td.ant-table-cell-fix-left),
+.dalianShippingTable :global(.ant-table-tbody > tr > td.ant-table-cell-fix-right) {
+  z-index: 5;
+  background: #fff;
+}
+
+/* 实验建档：物料号、条目左侧固定列 */
+.experimentArchivingTable :global(.ant-table-cell-fix-left-last::after) {
+  box-shadow: none;
+}
+
+.experimentArchivingTable :global(.ant-table-cell-fix-left) {
+  background: #fff;
+}
+
+.experimentArchivingTable :global(.ant-table-thead > tr > th.ant-table-cell-fix-left) {
+  z-index: 6;
+  background: #fafafa !important;
+}
+
+.experimentArchivingTable :global(.ant-table-tbody > tr > td.ant-table-cell-fix-left) {
+  z-index: 5;
+  background: #fff;
+}
+
+.experimentArchivingTable :global(.ant-table-tbody > tr:hover > td.ant-table-cell-fix-left) {
+  background: #fafafa;
+}
+
+.qcQueryButton:global(.ant-btn-primary) {
+  background: #fa8c16;
+  border-color: #fa8c16;
+}
+
+.qcQueryButton:global(.ant-btn-primary:not(:disabled):hover) {
+  background: #ffa940;
+  border-color: #ffa940;
+}
+
+.qcGeneratedRow :global(> td) {
+  background: #fff0f6 !important;
+}
+
+.qcGeneratedRow:hover :global(> td) {
+  background: #ffd6e7 !important;
+}
+
+.experimentCopiedRow:hover :global(> td) {
+  background: #bae0ff !important;
+}
+
+.experimentColumnDragHandle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: grab;
+  user-select: none;
+}
+
+.experimentColumnDragHandle::before {
+  content: '⋮⋮';
+  font-size: 10px;
+  letter-spacing: -2px;
+  color: #bfbfbf;
+  line-height: 1;
+}
+
+.experimentColumnDragHandle:active {
+  cursor: grabbing;
+}
+
+.experimentArchivingTable :global(th.table-column-dragging) {
+  opacity: 0.6;
+}
+
+.experimentColumnDropTarget {
+  box-shadow: inset 0 -2px 0 #1677ff;
+  background: #e6f4ff !important;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.stackForm :global(.ant-form-item) {
+  margin-bottom: 10px;
+}
+
+.fieldFull {
+  width: 100%;
+}
+
+.fieldMedium {
+  width: 320px;
+  max-width: 100%;
+}
+
+.fieldMedium:global(.ant-select) {
+  width: 320px;
+  max-width: 100%;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mobileTableHint {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-top: 6px;
+}
+
+.stickyBar {
+  position: sticky;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(4px);
+  border-top: 1px solid #eef1f6;
+  padding-top: 10px;
+}
+
+@media (max-width: 768px) {
+  .pageCard {
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+  }
+}

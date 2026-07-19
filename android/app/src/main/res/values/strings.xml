@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">铭远ERP</string>
+    <string name="title_activity_main">铭远ERP</string>
+    <string name="package_name">com.mingyuan.erp.mobile</string>
+    <string name="custom_url_scheme">com.mingyuan.erp.mobile</string>
+</resources>

@@ -1,0 +1,498 @@
+.test-fee-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: #1f2937;
+}
+
+.test-fee-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid #e6eef8;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f8fbff 0%, #edf5ff 100%);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+}
+
+.test-fee-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #102a43;
+}
+
+.test-fee-subtitle {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.test-fee-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.test-fee-step-card {
+  border: 1px solid #e8edf5;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.test-fee-step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef2f7;
+  background: linear-gradient(90deg, #f8fbff 0%, #f1f7ff 100%);
+}
+
+.test-fee-step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #fff;
+  background: #1677ff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.test-fee-step-title {
+  color: #102a43;
+  font-weight: 700;
+}
+
+.test-fee-step-desc {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.test-fee-step-body {
+  padding: 16px;
+}
+
+.test-fee-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.test-fee-alert.success {
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+}
+
+.test-fee-alert.info {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.test-fee-alert.error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.test-fee-toolbar,
+.test-fee-table-card {
+  border: 1px solid #e8edf5;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.test-fee-help {
+  border: 1px solid #e8edf5;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
+}
+
+.test-fee-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  padding: 0;
+  flex-wrap: wrap;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.test-fee-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.test-fee-field label {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.test-fee-date {
+  height: 34px;
+  min-width: 180px;
+  padding: 0 10px;
+  border: 1px solid #d5deea;
+  border-radius: 8px;
+  outline: none;
+}
+
+.test-fee-date:focus,
+.test-fee-input:focus {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+}
+
+.test-fee-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.test-fee-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.14);
+}
+
+.test-fee-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+}
+
+.test-fee-btn.primary {
+  background: #1677ff;
+}
+
+.test-fee-btn.indigo {
+  background: #4f46e5;
+}
+
+.test-fee-btn.success {
+  background: #059669;
+}
+
+.test-fee-btn.warning {
+  background: #d97706;
+}
+
+.test-fee-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.test-fee-summary-title {
+  font-weight: 700;
+  color: #102a43;
+}
+
+.test-fee-summary-meta {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.test-fee-table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 360px);
+}
+
+.test-fee-table {
+  table-layout: fixed;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.test-fee-table th {
+  position: sticky;
+  z-index: 2;
+  padding: 10px 8px;
+  border: 1px solid #dbe4f0;
+  background: #f8fafc;
+  color: #334155;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.test-fee-table thead tr.test-fee-group-header th {
+  top: 0;
+  background: #eef6ff;
+  height: 38px;
+}
+
+.test-fee-table thead tr.test-fee-col-header-row th {
+  top: 38px;
+  padding: 8px 20px 8px 8px;
+  position: sticky;
+}
+
+.test-fee-th-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.test-fee-col-header-row th {
+  position: sticky;
+  overflow: visible;
+}
+
+.test-fee-col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 4;
+}
+
+.test-fee-col-resize-handle:hover {
+  background: rgba(22, 119, 255, 0.15);
+}
+
+/* 横向滚动时固定左侧物料号、右侧操作列 */
+.test-fee-sticky-left {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: #fff;
+  box-shadow: 2px 0 6px rgba(15, 23, 42, 0.08);
+}
+
+.test-fee-sticky-right {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  background: #fff;
+  box-shadow: -2px 0 6px rgba(15, 23, 42, 0.08);
+}
+
+.test-fee-table thead .test-fee-sticky-left,
+.test-fee-table thead .test-fee-sticky-right {
+  z-index: 5;
+}
+
+.test-fee-table thead tr.test-fee-group-header .test-fee-sticky-left,
+.test-fee-table thead tr.test-fee-group-header .test-fee-sticky-right {
+  top: 0;
+  background: #eef6ff;
+  z-index: 6;
+}
+
+.test-fee-table thead .test-fee-sticky-corner {
+  z-index: 7;
+}
+
+.test-fee-table td.test-fee-sticky-left.test-fee-cell-readonly {
+  background: #f8fafc;
+}
+
+.test-fee-table tr:hover td.test-fee-sticky-left,
+.test-fee-table tr:hover td.test-fee-sticky-right {
+  background: #f8fbff;
+}
+
+.test-fee-table tr.missing-test-data td.test-fee-sticky-left,
+.test-fee-table tr.missing-test-data td.test-fee-sticky-right {
+  background: #fff7cc;
+}
+
+.test-fee-table tr.missing-test-data:hover td.test-fee-sticky-left,
+.test-fee-table tr.missing-test-data:hover td.test-fee-sticky-right {
+  background: #fff3b0;
+}
+
+.test-fee-table td {
+  padding: 7px 8px;
+  border: 1px solid #edf2f7;
+  background: #fff;
+  vertical-align: middle;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.test-fee-table tr:hover td {
+  background: #f8fbff;
+}
+
+.test-fee-table tr.missing-test-data td {
+  background: #fff7cc;
+}
+
+.test-fee-table tr.missing-test-data:hover td {
+  background: #fff3b0;
+}
+
+.test-fee-group-test {
+  background: #eff6ff !important;
+}
+
+.test-fee-group-qty {
+  background: #fff7ed !important;
+}
+
+.test-fee-group-sample {
+  background: #f0fdf4 !important;
+}
+
+.test-fee-group-fee {
+  background: #faf5ff !important;
+}
+
+.test-fee-input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #d9e2ec;
+  border-radius: 7px;
+  background: #fff;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.test-fee-input.money {
+  text-align: right;
+}
+
+.test-fee-delete {
+  border: 0;
+  background: transparent;
+  color: #dc2626;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.test-fee-cell-readonly {
+  background: #f8fafc !important;
+}
+
+.test-fee-readonly {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #334155;
+  line-height: 30px;
+  min-height: 30px;
+}
+
+.test-fee-warn-icon {
+  color: #dc2626;
+  margin-left: 6px;
+}
+
+.test-fee-cell-action {
+  overflow: visible;
+}
+
+.test-fee-action-cell {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.test-fee-action-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+}
+
+.test-fee-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid #eef2f7;
+}
+
+.test-fee-bottom-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 0 0;
+}
+
+.test-fee-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.test-fee-empty {
+  padding: 42px 16px !important;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.test-fee-help {
+  padding: 14px 16px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.test-fee-help-title {
+  margin-bottom: 8px;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.test-fee-help p {
+  margin: 4px 0;
+}
+
+@media (max-width: 900px) {
+  .test-fee-header {
+    flex-direction: column;
+  }
+
+  .test-fee-toolbar {
+    align-items: stretch;
+  }
+
+  .test-fee-field,
+  .test-fee-date,
+  .test-fee-btn {
+    width: 100%;
+  }
+}

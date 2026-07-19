@@ -1,0 +1,58 @@
+{
+  "app": {
+    "name": "铭远数字化管理系统",
+    "shortName": "铭远ERP"
+  },
+  "common": {
+    "login": "登录",
+    "logout": "退出",
+    "username": "用户名",
+    "password": "密码",
+    "submit": "提交",
+    "cancel": "取消",
+    "save": "保存",
+    "search": "搜索",
+    "language": "语言"
+  },
+  "nav": {
+    "dashboard": "工作台",
+    "contracts": "合同与订单",
+    "heatTreatment": "热处理与测试",
+    "production": "产品建档",
+    "finance": "财务管理",
+    "qc": "质检",
+    "packing": "装箱",
+    "shippingMarks": "打包发货"
+  },
+  "login": {
+    "title": "铭远ERP 登录",
+    "placeholderUsername": "请输入用户名",
+    "placeholderPassword": "请输入密码",
+    "rememberMe": "记住我"
+  },
+  "documents": {
+    "title": "单据中心（质保书/装箱单/唛头）",
+    "documentType": "单据类型",
+    "qualityCertificate": "质保书",
+    "packingList": "装箱单",
+    "shippingMark": "唛头",
+    "language": "语言",
+    "orderNo": "订单号",
+    "clientName": "客户名",
+    "productName": "产品名",
+    "specification": "规格",
+    "quantity": "数量",
+    "boxNo": "箱号",
+    "destinationPort": "目的港",
+    "preview": "预览",
+    "export": "导出",
+    "download": "下载文件",
+    "previewResult": "预览结果",
+    "emptyPreview": "暂无预览内容",
+    "previewSuccess": "预览生成成功",
+    "previewFailed": "预览失败",
+    "exportSuccess": "导出成功",
+    "exportFailed": "导出失败",
+    "exportCreated": "导出任务已创建"
+  }
+}

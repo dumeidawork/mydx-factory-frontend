@@ -1,0 +1,58 @@
+{
+  "app": {
+    "name": "銘遠デジタル管理システム",
+    "shortName": "銘遠ERP"
+  },
+  "common": {
+    "login": "ログイン",
+    "logout": "ログアウト",
+    "username": "ユーザー名",
+    "password": "パスワード",
+    "submit": "送信",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "search": "検索",
+    "language": "言語"
+  },
+  "nav": {
+    "dashboard": "ダッシュボード",
+    "contracts": "契約・注文",
+    "heatTreatment": "熱処理・試験",
+    "production": "製品登録",
+    "finance": "財務管理",
+    "qc": "品質検査",
+    "packing": "梱包",
+    "shippingMarks": "梱包・出荷"
+  },
+  "login": {
+    "title": "銘遠ERP ログイン",
+    "placeholderUsername": "ユーザー名を入力",
+    "placeholderPassword": "パスワードを入力",
+    "rememberMe": "ログイン状態を保持"
+  },
+  "documents": {
+    "title": "帳票センター（品質保証書/梱包明細書/荷印）",
+    "documentType": "帳票タイプ",
+    "qualityCertificate": "品質保証書",
+    "packingList": "梱包明細書",
+    "shippingMark": "荷印",
+    "language": "言語",
+    "orderNo": "注文番号",
+    "clientName": "顧客名",
+    "productName": "製品名",
+    "specification": "仕様",
+    "quantity": "数量",
+    "boxNo": "箱番号",
+    "destinationPort": "仕向港",
+    "preview": "プレビュー",
+    "export": "エクスポート",
+    "download": "ダウンロード",
+    "previewResult": "プレビュー結果",
+    "emptyPreview": "プレビュー内容なし",
+    "previewSuccess": "プレビュー作成成功",
+    "previewFailed": "プレビュー失敗",
+    "exportSuccess": "エクスポート成功",
+    "exportFailed": "エクスポート失敗",
+    "exportCreated": "エクスポートジョブを作成"
+  }
+}

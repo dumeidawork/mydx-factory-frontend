@@ -1,0 +1,54 @@
+.layout {
+  min-height: 100vh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 64px;
+  padding: 0 12px;
+  background: #001529;
+}
+
+.brand {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.desktopNav {
+  flex: 1;
+  min-width: 0;
+}
+
+.rightActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logoutBtn {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.content {
+  padding: 20px;
+  background: linear-gradient(180deg, #f4f8ff 0%, #f7f8fa 100%);
+}
+
+.mobileMenuBtn {
+  color: #fff;
+}
+
+@media (min-width: 992px) {
+  .header {
+    padding: 0 24px;
+    gap: 16px;
+  }
+  .content {
+    padding: 24px;
+  }
+}
