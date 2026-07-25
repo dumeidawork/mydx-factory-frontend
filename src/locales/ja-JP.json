@@ -6,6 +6,7 @@
   "common": {
     "login": "ログイン",
     "logout": "ログアウト",
+    "changePassword": "パスワード変更",
     "username": "ユーザー名",
     "password": "パスワード",
     "submit": "送信",
@@ -17,12 +18,14 @@
   "nav": {
     "dashboard": "ダッシュボード",
     "contracts": "契約・注文",
+    "manufacturing": "生産",
     "heatTreatment": "熱処理・試験",
     "production": "製品登録",
     "finance": "財務管理",
     "qc": "品質検査",
     "packing": "梱包",
-    "shippingMarks": "梱包・出荷"
+    "shippingMarks": "梱包・出荷",
+    "users": "ユーザー管理"
   },
   "login": {
     "title": "銘遠ERP ログイン",

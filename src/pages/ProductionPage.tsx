@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import styles from './WorkflowPages.module.css'
 import { apiUrl } from '../utils/api'
 import { message } from '../utils/feedback'
+import DrawingArchivePanel from './DrawingArchivePanel'
 import {
   buildOrderedColumns,
   DraggableHeaderCell,
@@ -424,14 +425,14 @@ function ExperimentalArchiving() {
     Modal.confirm({
       title: hasPackingAssociation ? '警告' : '确认删除',
       content: hasPackingAssociation
-        ? `该明细（订单号 ${record.order_no || form.getFieldValue('order_no') || '—'}、物料号 ${record.material_no}）已关联装箱数据，删除后装箱记录不会自动同步清除。是否仍要删除 id 为 ${record.id} 的记录？`
+        ? `该明细（订单号 ${record.order_no || form.getFieldValue('order_no') || '—'}、物料号 ${record.material_no}、条目 ${record.item_no ?? '空'}）已关联装箱数据，删除后将同步清除对应装箱记录。是否仍要删除 id 为 ${record.id} 的记录？`
         : `确定删除 order_details 表中 id 为 ${record.id} 的记录吗？`,
       okText: '确认删除',
       onOk: async () => {
         const res = await fetch(apiUrl(`/api/v1/workflow/orders/detail/${record.id}`), { method: 'DELETE' })
         const data = await res.json()
         if (!res.ok) {
-          message.error(data.detail || '删除失败')
+          message.error(typeof data.detail === 'string' ? data.detail : data.detail || '删除失败')
           return
         }
         message.success(data.message || `已删除 id 为 ${record.id} 的 1 条数据`)
@@ -1211,6 +1212,7 @@ export default function ProductionPage() {
         items={[
           { key: 'experiment', label: '实验建档', children: <ExperimentalArchiving /> },
           { key: 'materials', label: '物料建档', children: <MaterialArchiving /> },
+          { key: 'drawings', label: '图纸建档', children: <DrawingArchivePanel /> },
         ]}
       />
     </Card>

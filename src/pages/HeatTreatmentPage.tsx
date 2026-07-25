@@ -165,6 +165,7 @@ export default function HeatTreatmentPage() {
   const [trialPasteText, setTrialPasteText] = useState('')
   const [trialExists, setTrialExists] = useState(false)
   const [trialRefreshReady, setTrialRefreshReady] = useState(false)
+  const [trialRowErrors, setTrialRowErrors] = useState<Set<string>>(new Set())
   const [chemicalRaw, setChemicalRaw] = useState<ChemicalMap>(emptyChemicalMap())
   const [chemicalSelf, setChemicalSelf] = useState<ChemicalMap>(emptyChemicalMap())
   const [chemicalUpdater, setChemicalUpdater] = useState('')
@@ -179,6 +180,7 @@ export default function HeatTreatmentPage() {
     setTrialPasteText('')
     setTrialExists(false)
     setTrialRefreshReady(false)
+    setTrialRowErrors(new Set())
     setChemicalRaw(emptyChemicalMap())
     setChemicalSelf(emptyChemicalMap())
     setChemicalUpdater('')
@@ -204,6 +206,7 @@ export default function HeatTreatmentPage() {
     )
     setTrialExists(Boolean(data.exists))
     setTrialRefreshReady(false)
+    setTrialRowErrors(new Set())
     setActiveTab('trial')
     message.success(data.exists ? '已加载试验记录' : '未查询到试验记录，可直接新建')
   }
@@ -269,7 +272,17 @@ export default function HeatTreatmentPage() {
       message.warning('请填写试验记录更新者')
       return
     }
-    const doSave = async () => {
+
+    type TrialSaveResponse = {
+      status?: string
+      detail?: string | { message?: string; code?: string; row_indexes?: number[] }
+      message?: string
+      conflicts?: Array<{ index: number; label: string; existing_id: number }>
+      rows?: Array<Partial<TrialRow> & { index?: number }>
+      saved_count?: number
+    }
+
+    const doSave = async (confirmUpdateIndices: number[] = []) => {
       const res = await fetch(apiUrl('/api/v1/heat-treatment/trial/save'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -278,6 +291,7 @@ export default function HeatTreatmentPage() {
           heat_no: values.heat_no || '',
           batch_no: values.batch_no || '',
           updated_by: trialUpdater.trim(),
+          confirm_update_indices: confirmUpdateIndices,
           rows: trialRows.map((row) => ({
             id: row.id,
             test_date: row.test_date,
@@ -298,31 +312,56 @@ export default function HeatTreatmentPage() {
           })),
         }),
       })
-      const data: { detail?: string; rows?: Partial<TrialRow>[]; saved_count?: number } = await res.json()
+      const data: TrialSaveResponse = await res.json()
+
       if (!res.ok) {
-        Modal.error({ title: '提交失败', content: `提交失败。${data.detail || '试验记录保存失败'}` })
+        const detail = data.detail
+        if (detail && typeof detail === 'object' && detail.code === 'id_mismatch') {
+          const errorKeys = new Set(
+            (detail.row_indexes || [])
+              .map((index) => trialRows[index]?.rowKey)
+              .filter((rowKey): rowKey is string => Boolean(rowKey))
+          )
+          setTrialRowErrors(errorKeys)
+          Modal.error({ title: '提交失败', content: detail.message || 'id重复，请删除该行信息确认后重新提交' })
+          return
+        }
+        const messageText = typeof detail === 'string' ? detail : detail?.message || '试验记录保存失败'
+        Modal.error({ title: '提交失败', content: `提交失败。${messageText}` })
         return
       }
+
+      if (data.status === 'unchanged') {
+        setTrialRowErrors(new Set())
+        Modal.info({ title: '提示', content: data.message || '已存在相同数据，无数据更新' })
+        return
+      }
+
+      if (data.status === 'confirm_required') {
+        Modal.confirm({
+          title: '确认更新试验记录',
+          content: data.message || '已存在相同业务键的数据，是否更新该条数据的试验记录？',
+          onOk: () => doSave((data.conflicts || []).map((item) => item.index)),
+        })
+        return
+      }
+
       const savedRows = data.rows || []
-      setTrialRows((prev) =>
-        prev.map((row, idx) => ({
-          ...row,
-          id: typeof savedRows[idx]?.id === 'number' ? savedRows[idx].id : row.id,
-        }))
-      )
+      setTrialRows((prev) => {
+        const next = [...prev]
+        savedRows.forEach((savedRow) => {
+          if (typeof savedRow.index !== 'number' || typeof savedRow.id !== 'number') return
+          next[savedRow.index] = { ...next[savedRow.index], id: savedRow.id }
+        })
+        return next
+      })
+      setTrialRowErrors(new Set())
       setTrialExists(true)
       setTrialRefreshReady(true)
       setTrialPasteText('')
-      message.success(`提交成功（${data.saved_count ?? trialRows.length}条）`)
+      message.success(`提交成功（${data.saved_count ?? savedRows.length}条）`)
     }
-    if (trialExists) {
-      Modal.confirm({
-        title: '确认修改试验记录',
-        content: '当前是在修改已查询出的试验记录，提交后会覆盖原数据并记录日志，是否继续？',
-        onOk: doSave,
-      })
-      return
-    }
+
     await doSave()
   }
 
@@ -778,7 +817,14 @@ export default function HeatTreatmentPage() {
                 <div style={{ marginTop: 8, marginBottom: 12 }}>
                   <Button type="primary" onClick={applyTrialPaste}>应用粘贴</Button>
                 </div>
-                <Table rowKey="rowKey" pagination={false} scroll={{ x: 2600 }} dataSource={trialRows} columns={trialColumns} />
+                <Table
+                  rowKey="rowKey"
+                  pagination={false}
+                  scroll={{ x: 2600 }}
+                  dataSource={trialRows}
+                  columns={trialColumns}
+                  rowClassName={(row) => (trialRowErrors.has(row.rowKey) ? styles.trialRowError : '')}
+                />
               </Card>
             ),
           },

@@ -6,6 +6,15 @@ import { askSavePath } from '../utils/savePath'
 import { message } from '../utils/feedback'
 import { getDownloadFileName, readFetchErrorMessage, saveGeneratedBlob } from '../utils/clientFileSave'
 
+const STEP2_TABLE_BODY_HEIGHT = 480
+const STEP3_DEFAULTS = {
+  box_length: 1200,
+  box_width: 800,
+  box_height: 200,
+  box_weight: 20,
+  packing_remark: '欧式托盘',
+}
+
 type ItemRow = {
   rowKey: string
   id?: number
@@ -124,6 +133,71 @@ export default function PackingPage() {
     setSelectedKeys((prev) => prev.filter((x) => x !== row.rowKey))
   }
 
+  const deleteSelectedPackingRows = () => {
+    if (!selectedKeys.length) {
+      message.warning('请先勾选要删除的装箱行')
+      return
+    }
+    const selectedSet = new Set(selectedKeys.map(String))
+    const selectedRows = rows.filter((row) => selectedSet.has(String(row.rowKey)))
+    Modal.confirm({
+      title: '删除该订单的装箱信息',
+      content: `确认删除已选中的 ${selectedRows.length} 条装箱记录？删除后将立即保存。`,
+      okText: '确认删除',
+      okType: 'danger',
+      onOk: async () => {
+        const removeIds = selectedRows.filter((row) => row.id != null).map((row) => Number(row.id))
+        const nextDeleted = Array.from(new Set([...deletedIds, ...removeIds]))
+        setDeletedIds(nextDeleted)
+        setRows((prev) => prev.filter((row) => !selectedSet.has(String(row.rowKey))))
+        setSelectedKeys([])
+        const { order_no } = await form.validateFields(['order_no'])
+        setSaving(true)
+        try {
+          const remainingRows = rows.filter((row) => !selectedSet.has(String(row.rowKey)))
+          const res = await fetch(apiUrl('/api/v1/workflow/packing/save'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              order_no,
+              deleted_ids: nextDeleted,
+              rows: remainingRows.map((row) => ({
+                id: row.id,
+                source_order_detail_id: row.source_order_detail_id,
+                material_no: row.material_no,
+                item_no: row.item_no ?? undefined,
+                quantity: row.quantity,
+                unit_weight: row.unit_weight,
+                total_weight: row.total_weight,
+                spec: row.spec,
+                standard: row.standard,
+                material: row.material,
+                remark1: row.remark1 || '',
+                box_no: row.box_no || null,
+              })),
+            }),
+          })
+          const data = await res.json()
+          if (!res.ok) {
+            message.error(data.detail || '删除失败')
+            await reloadRows(order_no)
+            return
+          }
+          setDeletedIds([])
+          setRows(
+            (data.rows || []).map((row: Omit<ItemRow, 'rowKey'>, idx: number) => ({
+              ...row,
+              rowKey: String(row.id ?? `${row.material_no}-${idx}-${Date.now()}`),
+            }))
+          )
+          message.success(`已删除 ${selectedRows.length} 条装箱信息`)
+        } finally {
+          setSaving(false)
+        }
+      },
+    })
+  }
+
   const editItemNo = (row: ItemRow) => {
     const inputId = `packing-item-${row.rowKey}`
     Modal.confirm({
@@ -178,12 +252,16 @@ export default function PackingPage() {
   }
 
   const submit = async () => {
-    const values = await form.validateFields(['order_no', 'box_no', 'box_length', 'box_width', 'box_height', 'box_weight', 'packing_remark'])
+    const values = await form.validateFields(['order_no', 'box_length', 'box_width', 'box_height', 'box_weight', 'packing_remark'])
     const selected = rows.filter((x) => selectedKeys.includes(x.rowKey))
     if (!selected.length) return message.warning('请先勾选要入箱的物料+条目')
     if (selected.some((x) => !x.id)) {
       message.warning('存在未保存的行，请先点击【保存】')
       return
+    }
+    const missingBoxNo = selected.filter((x) => !x.box_no || x.box_no < 1)
+    if (missingBoxNo.length) {
+      return message.warning('所选行须填写大于0的箱号，请在Step2表格中输入')
     }
     setSubmitting(true)
     try {
@@ -192,8 +270,7 @@ export default function PackingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           order_no: values.order_no,
-          row_ids: selected.map((x) => Number(x.id)),
-          box_no: values.box_no,
+          items: selected.map((x) => ({ row_id: Number(x.id), box_no: Number(x.box_no) })),
           box_length: values.box_length,
           box_width: values.box_width,
           box_height: values.box_height,
@@ -205,7 +282,7 @@ export default function PackingPage() {
       if (!res.ok) return message.error(data.detail || '提交失败')
       await reloadRows(values.order_no)
       setSelectedKeys([])
-      form.setFieldsValue({ box_no: undefined, box_weight: 20, packing_remark: '' })
+      form.setFieldsValue(STEP3_DEFAULTS)
       message.success(`装箱提交成功，更新${data.count}条`)
     } finally {
       setSubmitting(false)
@@ -248,22 +325,24 @@ export default function PackingPage() {
 
   return (
     <Card title="装箱工作台" className={styles.pageCard}>
-      <Form form={form} layout="vertical" initialValues={{ box_weight: 20 }}>
+      <Form form={form} layout="vertical" initialValues={STEP3_DEFAULTS}>
         <Card size="small" title="Step1 检索待装箱物料" className={styles.sectionCard}>
-          <Space wrap align="end">
+          <div className={styles.toolbarRow}>
             <Form.Item name="order_no" label="订单号" rules={[{ required: true }]}>
               <Input style={{ width: 220 }} />
             </Form.Item>
             <Button type="primary" onClick={loadItems}>
               加载待装箱明细
             </Button>
-          </Space>
-          <Space wrap align="end">
+          </div>
+          <div className={styles.toolbarRow}>
             <Form.Item name="factory_order_no" label="本厂单号">
               <Input style={{ width: 220 }} readOnly placeholder="加载待装箱明细后自动读取" />
             </Form.Item>
-            <Button onClick={editFactoryOrderNo}>修改</Button>
-          </Space>
+            <Button type="primary" className={styles.qcQueryButton} onClick={editFactoryOrderNo}>
+              修改
+            </Button>
+          </div>
         </Card>
 
         <Card size="small" title="Step2 选择物料并定义条目" className={styles.sectionCard}>
@@ -273,18 +352,34 @@ export default function PackingPage() {
             <Button type="primary" loading={saving} onClick={saveRows}>
               保存
             </Button>
+            <Button danger loading={saving} onClick={deleteSelectedPackingRows}>
+              删除该订单的装箱信息
+            </Button>
           </div>
           <Table
             rowKey="rowKey"
             dataSource={rows}
             pagination={false}
+            scroll={{ y: STEP2_TABLE_BODY_HEIGHT }}
             rowSelection={{ selectedRowKeys: selectedKeys, onChange: (keys) => setSelectedKeys(keys as (string | number)[]) }}
             columns={[
               {
                 title: '箱号',
                 dataIndex: 'box_no',
                 width: 100,
-                render: (v: number | null | undefined) => (v ? <Tag color="red">{v}</Tag> : <Tag>未装箱</Tag>),
+                render: (_v: number | null | undefined, row: ItemRow) => (
+                  <InputNumber
+                    min={1}
+                    precision={0}
+                    value={row.box_no ?? undefined}
+                    placeholder="未装箱"
+                    style={{ width: '100%' }}
+                    onChange={(val) => {
+                      const next = val == null ? null : Number(val)
+                      setRows((prev) => prev.map((x) => (x.rowKey === row.rowKey ? { ...x, box_no: next } : x)))
+                    }}
+                  />
+                ),
               },
               {
                 title: '条目',
@@ -340,9 +435,6 @@ export default function PackingPage() {
 
         <Card size="small" title="Step3 物理箱体信息录入" className={styles.sectionCard}>
           <Space wrap align="end">
-            <Form.Item name="box_no" label="箱号" rules={[{ required: true }]}>
-              <InputNumber min={1} />
-            </Form.Item>
             <Form.Item name="box_length" label="长度" rules={[{ required: true }]}>
               <InputNumber min={1} />
             </Form.Item>
@@ -353,7 +445,7 @@ export default function PackingPage() {
               <InputNumber min={1} />
             </Form.Item>
             <Form.Item name="box_weight" label="箱重(毛重)" rules={[{ required: true }]}>
-              <InputNumber min={0} step={0.01} />
+              <InputNumber min={0} step={0.01} precision={2} />
             </Form.Item>
             <Form.Item name="packing_remark" label="装箱备注">
               <Input style={{ width: 240 }} />

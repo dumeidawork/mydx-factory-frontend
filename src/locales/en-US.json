@@ -6,6 +6,7 @@
   "common": {
     "login": "Login",
     "logout": "Logout",
+    "changePassword": "Change password",
     "username": "Username",
     "password": "Password",
     "submit": "Submit",
@@ -17,12 +18,14 @@
   "nav": {
     "dashboard": "Dashboard",
     "contracts": "Contracts & Orders",
+    "manufacturing": "Manufacturing",
     "heatTreatment": "Heat Treatment & Testing",
     "production": "Product Archiving",
     "finance": "Finance",
     "qc": "Quality Inspection",
     "packing": "Packing",
-    "shippingMarks": "Packing & Shipping"
+    "shippingMarks": "Packing & Shipping",
+    "users": "Users"
   },
   "login": {
     "title": "Mingyuan ERP Login",

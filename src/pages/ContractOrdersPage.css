@@ -1,0 +1,119 @@
+.contract-tabs .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+.contract-tabs .ant-tabs-nav::before {
+  border-bottom: none;
+}
+
+.contract-tabs .ant-tabs-nav-list {
+  gap: 8px;
+}
+
+.contract-tabs .ant-tabs-tab {
+  margin: 0 !important;
+  padding: 6px 16px !important;
+  background: #fff !important;
+  border: 1px solid #1677ff !important;
+  border-bottom: none !important;
+  border-radius: 6px 6px 0 0 !important;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+.contract-tabs .ant-tabs-tab:hover {
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.15);
+}
+
+.contract-tabs .ant-tabs-tab .ant-tabs-tab-btn {
+  color: #1677ff !important;
+}
+
+.contract-tabs .ant-tabs-tab-active {
+  background: #1677ff !important;
+  border-color: #1677ff !important;
+}
+
+.contract-tabs .ant-tabs-tab-active .ant-tabs-tab-btn,
+.contract-tabs .ant-tabs-tab-active .contract-tab-label {
+  color: #fff !important;
+}
+
+.contract-tabs .ant-tabs-ink-bar {
+  display: none;
+}
+
+.contract-tabs .contract-tab-label {
+  cursor: grab;
+  user-select: none;
+}
+
+.contract-tabs .contract-tab-label:active,
+.contract-tabs .contract-tab-label--dragging {
+  cursor: grabbing;
+}
+
+.contract-tabs .contract-tab-label--drag-over {
+  outline: 2px dashed #1677ff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.contract-upload-section {
+  padding: 16px;
+  margin-bottom: 0;
+  border: 1px solid #e6eef8;
+  border-radius: 8px;
+  background: #fafcff;
+}
+
+.contract-query-section {
+  padding: 16px;
+  border: 1px solid #e6eef8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.contract-query-title {
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #1f2a37;
+}
+
+.contract-unassigned-title {
+  color: #cf1322;
+  font-weight: 600;
+}
+
+.contract-archive-form .contract-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 24px;
+  margin-bottom: 4px;
+}
+
+.contract-archive-form .contract-form-row .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.contract-upload-save-btn {
+  background: #fa8c16 !important;
+  border-color: #fa8c16 !important;
+  color: #fff !important;
+}
+
+.contract-upload-save-btn:hover,
+.contract-upload-save-btn:focus {
+  background: #ffa940 !important;
+  border-color: #ffa940 !important;
+  color: #fff !important;
+}
+
+.contract-archive-table .ant-table-thead > tr > th {
+  background: #f0f6ff;
+}
+
+/* 图纸或物料建档缺失：待补资料 */
+.missing-drawing-row > td {
+  background: #fff7cc !important;
+}

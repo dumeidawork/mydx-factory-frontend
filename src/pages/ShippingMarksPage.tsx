@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs } from 'antd'
-import dayjs from 'dayjs'
+import dayjs, { type Dayjs } from 'dayjs'
 import DalianShippingPanel from '../components/DalianShippingPanel'
 import styles from './WorkflowPages.module.css'
 import { apiUrl, isFetchGuardHandled } from '../utils/api'
@@ -22,6 +22,7 @@ const SIZE_PRESETS: Record<Exclude<PresetKey, 'CUSTOM'>, { label: string; width:
 function FranceShippingPanel() {
   const [rows, setRows] = useState<BoxRow[]>([])
   const [selected, setSelected] = useState<(string | number)[]>([])
+  const [batchDeliveryDate, setBatchDeliveryDate] = useState<Dayjs | undefined>()
   const [markReady, setMarkReady] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [saveDir, setSaveDir] = useState('')
@@ -35,6 +36,7 @@ function FranceShippingPanel() {
   )
   const [form] = Form.useForm()
   const primaryButtonStyle = { background: '#1677ff' }
+  const toolbarFieldWidth = 220
 
   const fetchWithTimeout = async (url: string, options: RequestInit) => fetch(url, options)
 
@@ -43,8 +45,21 @@ function FranceShippingPanel() {
     const res = await fetch(apiUrl(`/api/v1/workflow/shipping/boxes?order_no=${encodeURIComponent(order_no)}`))
     const data = await res.json()
     if (!res.ok) return message.error(data.detail || '加载失败')
-    setRows(data.rows || [])
-    setSelected([])
+    const loadedRows: BoxRow[] = data.rows || []
+    setRows(loadedRows)
+    setSelected(loadedRows.map((r) => r.box_no))
+    setBatchDeliveryDate(undefined)
+    setMarkReady(false)
+  }
+
+  const applyBatchDeliveryDate = (date: Dayjs | null) => {
+    setBatchDeliveryDate(date ?? undefined)
+    if (!date) return
+    const dateStr = date.format('YYYY-MM-DD')
+    const selectedSet = new Set(selected)
+    setRows((prev) =>
+      prev.map((r) => (selectedSet.has(r.box_no) ? { ...r, delivery_date: dateStr } : r))
+    )
   }
 
   const updateDates = async () => {
@@ -214,17 +229,27 @@ function FranceShippingPanel() {
       </Card>
 
       <Card size="small" title="Step2 打包信息与交货日期维护" className={styles.sectionCard}>
-        <Space wrap align="end">
+        <div className={styles.toolbarRow}>
           <Form.Item name="order_no" label="订单号" rules={[{ required: true }]}>
-            <Input style={{ width: 220 }} />
+            <Input style={{ width: toolbarFieldWidth }} />
           </Form.Item>
           <Button type="primary" style={primaryButtonStyle} onClick={loadBoxes}>
             加载装箱箱号
           </Button>
-          <Button type="primary" style={primaryButtonStyle} onClick={updateDates}>
+        </div>
+        <div className={styles.toolbarRow}>
+          <Form.Item label="交货日期">
+            <DatePicker
+              style={{ width: toolbarFieldWidth }}
+              disabled={!rows.length}
+              value={batchDeliveryDate}
+              onChange={applyBatchDeliveryDate}
+            />
+          </Form.Item>
+          <Button type="primary" style={primaryButtonStyle} disabled={!rows.length} onClick={updateDates}>
             确认交货日期
           </Button>
-        </Space>
+        </div>
         <Table
           rowKey="box_no"
           rowSelection={{ selectedRowKeys: selected, onChange: (keys) => setSelected(keys as (string | number)[]) }}

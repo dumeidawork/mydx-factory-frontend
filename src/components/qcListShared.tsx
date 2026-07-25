@@ -132,12 +132,12 @@ export function deleteQcListRow(row: QcListRow, reload: () => Promise<void>) {
   const rowId = Number(row.id)
   Modal.confirm({
     title: '确认删除',
-    content: `确定删除 order_details 表中 id 为 ${rowId} 的记录吗？`,
+    content: `确定删除 order_details 表中 id 为 ${rowId} 的记录吗？若该订单号+物料号+条目已无剩余订单行，将同步清除对应装箱记录。`,
     onOk: async () => {
       const res = await fetch(apiUrl(`/api/v1/workflow/orders/detail/${rowId}`), { method: 'DELETE' })
       const data = await res.json()
       if (!res.ok) {
-        message.error(data.detail || '删除失败')
+        message.error(typeof data.detail === 'string' ? data.detail : '删除失败')
         return
       }
       message.success(data.message || `已删除 id 为 ${rowId} 的 1 条数据`)

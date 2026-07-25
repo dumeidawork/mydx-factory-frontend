@@ -13,6 +13,19 @@
   border: 1px solid #e8eef8;
 }
 
+.toolbarRow {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.toolbarRow :global(.ant-form-item) {
+  margin-bottom: 0;
+}
+
 /* 大连发货明细表：左右固定列层级（勿改 header position，否则会破坏右侧固定列） */
 .dalianShippingTable :global(.ant-table-cell-fix-left-last::after),
 .dalianShippingTable :global(.ant-table-cell-fix-right-first::after) {
@@ -62,6 +75,14 @@
 
 .experimentArchivingTable :global(.ant-table-tbody > tr:hover > td.ant-table-cell-fix-left) {
   background: #fafafa;
+}
+
+.trialRowError :global(> td) {
+  background: #fff1f0 !important;
+}
+
+.trialRowError:hover :global(> td) {
+  background: #ffccc7 !important;
 }
 
 .qcQueryButton:global(.ant-btn-primary) {

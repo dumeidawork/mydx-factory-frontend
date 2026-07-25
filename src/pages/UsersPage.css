@@ -1,0 +1,35 @@
+.users-page {
+  width: 100%;
+}
+
+.users-page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.users-page-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #e6f4ff;
+  color: #1677ff;
+  font-size: 20px;
+}
+
+.users-page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: #1f2a37;
+}
+
+.users-page-subtitle {
+  margin-top: 4px;
+  color: #667085;
+  font-size: 13px;
+}

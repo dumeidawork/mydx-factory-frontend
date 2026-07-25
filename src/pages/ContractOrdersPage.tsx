@@ -2,12 +2,15 @@ import type React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import type { TabsProps } from 'antd'
 import { Resizable } from 'react-resizable'
 import 'react-resizable/css/styles.css'
 import { apiUrl } from '../utils/api'
 import { saveGeneratedBlob } from '../utils/clientFileSave'
 import { message } from '../utils/feedback'
 import { askSavePathAndFileName } from '../utils/savePath'
+import ContractArchivePanel from './ContractArchivePanel'
+import './ContractOrdersPage.css'
 
 type AnyRow = Record<string, unknown>
 type ManualRow = {
@@ -22,8 +25,12 @@ type ManualRow = {
   quantity: number
   unit_weight: number
   total_weight: number
+  agreement_price: number
+  product_unit_price: number
   remark1: string
   remark2: string
+  /** 提交后由后端回填：待补资料 */
+  doc_status?: string
 }
 type MaterialLookupResult = {
   source_index: number
@@ -33,6 +40,9 @@ type MaterialLookupResult = {
   spec_model: string
   material: string
   unit_weight: number
+  product_unit_price?: number
+  france_agreement_price?: number
+  dalian_agreement_price?: number
 }
 type MaterialLookupMissing = {
   source_index: number
@@ -45,7 +55,11 @@ type OrderSubmitFormValues = {
   factory_order_no?: string
   customer: string
 }
-type CellState = 'normal' | 'error' | 'fixed'
+type CellState = 'normal' | 'error' | 'fixed' | 'diff'
+
+/** 可通过「获取物料信息」回填的字段 */
+const MATERIAL_FETCH_FIELDS = ['name', 'spec_model', 'material', 'unit_weight', 'total_weight', 'agreement_price', 'product_unit_price'] as const
+type MaterialFetchField = (typeof MATERIAL_FETCH_FIELDS)[number]
 
 const statusOptions = ['开始', '分割', '加工', '入库', '质检', '再加工', '包装', '装箱', '打包', '发货', '完成']
 const modeOptions = ['本厂钢材', '外来毛胚', '外来成品']
@@ -54,6 +68,8 @@ const customerOptions = [
   { value: 'Siemens S.A.S.', label: 'Siemens S.A.S.' },
   { value: 'Siemens Sensors＆Communication Ltd.', label: 'Siemens Sensors＆Communication Ltd.' },
 ]
+
+const DEFAULT_CONTRACT_TAB_ORDER = ['contract-upload', 'manual', 'dalian', 'query', 'split']
 
 /** 与后端 ORDER_DETAIL_WRITABLE_FIELDS 一致 */
 const ORDER_DETAIL_WRITABLE_KEYS = [
@@ -71,6 +87,8 @@ const ORDER_DETAIL_WRITABLE_KEYS = [
   'quantity',
   'unit_weight',
   'total_weight',
+  'agreement_price',
+  'product_unit_price',
   'remark1',
   'remark2',
   'heat_no',
@@ -99,11 +117,14 @@ const ORDER_DETAIL_DISPLAY_ORDER = [
   'quantity',
   'unit_weight',
   'total_weight',
+  'agreement_price',
+  'product_unit_price',
   'remark1',
   'remark2',
   'heat_no',
   'heat_treatment_batch_no',
   'status',
+  'doc_status',
   'upload_type',
   'material_mode',
   'started_at',
@@ -133,11 +154,14 @@ const ORDER_DETAIL_LABELS: Record<string, string> = {
   quantity: '数量',
   unit_weight: '单重',
   total_weight: '总重',
+  agreement_price: '协议价',
+  product_unit_price: '产品单价',
   remark1: '备注1',
   remark2: '备注2',
   heat_no: '炉号',
   heat_treatment_batch_no: '热处理批号',
   status: '状态',
+  doc_status: '资料状态',
   upload_type: '上传方式',
   material_mode: '生产模式',
   started_at: '开始时间',
@@ -325,7 +349,7 @@ function buildPatchFromRow(original: AnyRow, values: Record<string, unknown>): R
       changed = normItem(original[key]) !== normItem(after)
     } else if (key === 'quantity' || key === 'seq') {
       changed = Number(original[key] ?? 0) !== Number(after ?? 0)
-    } else if (key === 'unit_weight' || key === 'total_weight') {
+    } else if (key === 'unit_weight' || key === 'total_weight' || key === 'agreement_price' || key === 'product_unit_price') {
       changed = Number(original[key] ?? 0) !== Number(after ?? 0)
     } else {
       changed = norm(original[key]) !== norm(after)
@@ -355,6 +379,8 @@ function parseTsv(text: string): ManualRow[] {
         quantity: Number(cols[7] || 0),
         unit_weight: Number(cols[8] || 0),
         total_weight: Number(cols[9] || 0),
+        agreement_price: Number(cols[12] || 0),
+        product_unit_price: Number(cols[13] || 0),
         remark1: cols[10] || '',
         remark2: cols[11] || '',
       }
@@ -380,6 +406,9 @@ function parseDalianTsv(text: string): ManualRow[] {
         quantity: Number(cols[4] || 0),
         unit_weight: 0,
         total_weight: 0,
+        // 协议价、产品单价不从粘贴取得，由「获取物料信息」从物料表回填
+        agreement_price: 0,
+        product_unit_price: 0,
         remark1: cols[5] || '',
         remark2: cols[6] || '',
       }
@@ -388,6 +417,48 @@ function parseDalianTsv(text: string): ManualRow[] {
 
 function totalWeight(quantity: number, unitWeight: number) {
   return Math.round(Number(quantity || 0) * Number(unitWeight || 0) * 100) / 100
+}
+
+/** 2 开头=法国订单；4 开头=大连订单 */
+function resolveOrderLine(orderNo: string): { line: 'france' | 'dalian'; error?: string } {
+  const trimmed = String(orderNo || '').trim()
+  if (!trimmed) return { line: 'dalian', error: '请先填写订单号后再获取物料信息' }
+  const prefix = trimmed[0]
+  if (prefix === '2') return { line: 'france' }
+  if (prefix === '4') return { line: 'dalian' }
+  return { line: 'dalian', error: `订单号【${trimmed}】无法识别客户线（2开头=法国，4开头=大连）` }
+}
+
+function resolveAgreementPrice(orderNo: string, hit: MaterialLookupResult): number {
+  const { line } = resolveOrderLine(orderNo)
+  if (line === 'france') return Number(hit.france_agreement_price || 0)
+  return Number(hit.dalian_agreement_price || 0)
+}
+
+function normCompare(value: unknown, numeric: boolean) {
+  if (numeric) return Number(value || 0)
+  return String(value ?? '').trim()
+}
+
+function buildFetchedMaterialPatch(orderNo: string, row: ManualRow, hit: MaterialLookupResult) {
+  const unitWeight = Number(hit.unit_weight || 0)
+  const next: Pick<ManualRow, MaterialFetchField> = {
+    name: hit.part_no || '',
+    spec_model: hit.spec_model || '',
+    material: hit.material || '',
+    unit_weight: unitWeight,
+    total_weight: totalWeight(row.quantity, unitWeight),
+    agreement_price: resolveAgreementPrice(orderNo, hit),
+    product_unit_price: Number(hit.product_unit_price || 0),
+  }
+  const changedFields: MaterialFetchField[] = []
+  MATERIAL_FETCH_FIELDS.forEach((field) => {
+    const numeric = field === 'unit_weight' || field === 'total_weight' || field === 'agreement_price' || field === 'product_unit_price'
+    if (normCompare(row[field], numeric) !== normCompare(next[field], numeric)) {
+      changedFields.push(field)
+    }
+  })
+  return { next, changedFields }
 }
 
 function errorText(detail: unknown, fallback: string) {
@@ -410,6 +481,8 @@ function emptyManualRow(index: number): ManualRow {
     quantity: 0,
     unit_weight: 0,
     total_weight: 0,
+    agreement_price: 0,
+    product_unit_price: 0,
     remark1: '',
     remark2: '',
   }
@@ -464,10 +537,10 @@ function OrderDetailWritableFormItems({ seqExtra }: { seqExtra?: string }) {
             </Form.Item>
           )
         }
-        if (key === 'unit_weight' || key === 'total_weight') {
+        if (key === 'unit_weight' || key === 'total_weight' || key === 'agreement_price' || key === 'product_unit_price') {
           return (
             <Form.Item key={key} name={key} label={label}>
-              <InputNumber style={{ width: '100%' }} min={0} />
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} />
             </Form.Item>
           )
         }
@@ -501,6 +574,10 @@ export default function ContractOrdersPage() {
   const [selectedQueryKeys, setSelectedQueryKeys] = useState<React.Key[]>([])
   const [selectedSplitKeys, setSelectedSplitKeys] = useState<React.Key[]>([])
   const [activeTab, setActiveTab] = useState('manual')
+  const [tabOrder, setTabOrder] = useState(DEFAULT_CONTRACT_TAB_ORDER)
+  const [dragTabKey, setDragTabKey] = useState<string | null>(null)
+  const [dragOverTabKey, setDragOverTabKey] = useState<string | null>(null)
+  const [manualFetchStatus, setManualFetchStatus] = useState('')
   const [dalianFetchStatus, setDalianFetchStatus] = useState('')
   const [queryMaterialFetchStatus, setQueryMaterialFetchStatus] = useState('')
   const [manualColWidths, setManualColWidths] = useState<Record<string, number>>({
@@ -516,6 +593,8 @@ export default function ContractOrdersPage() {
     total_weight: 110,
     remark1: 140,
     remark2: 140,
+    agreement_price: 120,
+    product_unit_price: 120,
     action: 90,
   })
   const [dalianColWidths, setDalianColWidths] = useState<Record<string, number>>({
@@ -529,6 +608,8 @@ export default function ContractOrdersPage() {
     quantity: 110,
     unit_weight: 110,
     total_weight: 110,
+    agreement_price: 120,
+    product_unit_price: 120,
     remark1: 140,
     remark2: 140,
     action: 90,
@@ -567,6 +648,11 @@ export default function ContractOrdersPage() {
     setCellStates((prev) => {
       const key = `${rowKey}.${String(field)}`
       if (prev[key] === 'error') return { ...prev, [key]: 'fixed' }
+      if (prev[key] === 'diff') {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
       return prev
     })
   }
@@ -576,6 +662,11 @@ export default function ContractOrdersPage() {
     setDalianCellStates((prev) => {
       const key = `${rowKey}.${String(field)}`
       if (prev[key] === 'error') return { ...prev, [key]: 'fixed' }
+      if (prev[key] === 'diff') {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
       return prev
     })
   }
@@ -601,6 +692,14 @@ export default function ContractOrdersPage() {
         nextState[`${r.key}.total_weight`] = 'error'
         errors.push(`第${rowNo}行总重不能为负`)
       }
+      if (r.agreement_price < 0) {
+        nextState[`${r.key}.agreement_price`] = 'error'
+        errors.push(`第${rowNo}行协议价不能为负`)
+      }
+      if (r.product_unit_price < 0) {
+        nextState[`${r.key}.product_unit_price`] = 'error'
+        errors.push(`第${rowNo}行产品单价不能为负`)
+      }
     })
     const seqRows = new Map<number, number[]>()
     rows.forEach((r, idx) => {
@@ -622,13 +721,15 @@ export default function ContractOrdersPage() {
   const cellStyle = (states: Record<string, CellState>, rowKey: string, field: keyof ManualRow) => {
     const state = states[`${rowKey}.${String(field)}`] || 'normal'
     if (state === 'error') return { background: '#fff1f0', borderColor: '#ff4d4f' }
-    if (state === 'fixed') return { background: '#fffbe6', borderColor: '#faad14' }
+    if (state === 'fixed') return { background: '#f6ffed', borderColor: '#52c41a' }
+    if (state === 'diff') return { background: '#e6f4ff', borderColor: '#1677ff' }
     return {}
   }
 
   const submitOrderRows = async (
     form: ReturnType<typeof Form.useForm>[0],
     rows: ManualRow[],
+    setRows: React.Dispatch<React.SetStateAction<ManualRow[]>>,
     updateCellStates: React.Dispatch<React.SetStateAction<Record<string, CellState>>>,
     onSuccess?: () => void
   ) => {
@@ -657,6 +758,8 @@ export default function ContractOrdersPage() {
         quantity: Number(r.quantity || 0),
         unit_weight: Number(r.unit_weight || 0),
         total_weight: Number(r.total_weight || 0),
+        agreement_price: Number(r.agreement_price || 0),
+        product_unit_price: Number(r.product_unit_price || 0),
         remark1: r.remark1,
         remark2: r.remark2,
       })),
@@ -676,23 +779,87 @@ export default function ContractOrdersPage() {
     }
     updateCellStates({})
     form.setFieldValue('table_text', '')
+    const createdRows = (data.rows || []) as Array<{ seq?: number; doc_status?: string }>
+    const docBySeq = new Map<number, string>()
+    createdRows.forEach((r) => {
+      if (r.seq != null) docBySeq.set(Number(r.seq), r.doc_status || '')
+    })
+    setRows((prev) =>
+      prev.map((r) => ({
+        ...r,
+        doc_status: docBySeq.has(Number(r.seq)) ? docBySeq.get(Number(r.seq)) : r.doc_status,
+      }))
+    )
     onSuccess?.()
-    message.success(`提交成功，共${data.count}条`)
+    const pending = Number(data.pending_docs_count || 0)
+    if (pending > 0) {
+      message.warning(`提交成功，共${data.count}条；其中 ${pending} 条缺少图纸或物料建档，已标记「待补资料」`)
+    } else {
+      message.success(`提交成功，共${data.count}条`)
+    }
   }
 
   const handleManualSubmit = async () => {
-    await submitOrderRows(manualForm, manualRows, setCellStates)
+    await submitOrderRows(manualForm, manualRows, setManualRows, setCellStates, () => setManualFetchStatus(''))
   }
 
   const handleDalianSubmit = async () => {
-    await submitOrderRows(dalianForm, dalianRows, setDalianCellStates, () => setDalianFetchStatus(''))
+    await submitOrderRows(dalianForm, dalianRows, setDalianRows, setDalianCellStates, () => setDalianFetchStatus(''))
   }
 
   const handleTabChange = (key: string) => {
+    if (activeTab === 'manual') setManualFetchStatus('')
     if (activeTab === 'dalian') setDalianFetchStatus('')
     if (activeTab === 'query') setQueryMaterialFetchStatus('')
     setActiveTab(key)
   }
+
+  const makeOrderedTabItems = (items: NonNullable<TabsProps['items']>) =>
+    tabOrder
+      .map((key) => items.find((item) => item?.key === key))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .map((item) => ({
+        ...item,
+        label: (
+          <span
+            className={`contract-tab-label${dragTabKey === item.key ? ' contract-tab-label--dragging' : ''}${dragOverTabKey === item.key ? ' contract-tab-label--drag-over' : ''}`}
+            draggable
+            onDragStart={(e) => {
+              setDragTabKey(String(item.key))
+              e.dataTransfer.effectAllowed = 'move'
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragOverTabKey(String(item.key))
+            }}
+            onDragLeave={() => setDragOverTabKey(null)}
+            onDrop={(e) => {
+              e.preventDefault()
+              const sourceKey = dragTabKey
+              const targetKey = String(item.key)
+              if (sourceKey && sourceKey !== targetKey) {
+                setTabOrder((prev) => {
+                  const next = [...prev]
+                  const fromIdx = next.indexOf(sourceKey)
+                  const toIdx = next.indexOf(targetKey)
+                  if (fromIdx < 0 || toIdx < 0) return prev
+                  next.splice(fromIdx, 1)
+                  next.splice(toIdx, 0, sourceKey)
+                  return next
+                })
+              }
+              setDragTabKey(null)
+              setDragOverTabKey(null)
+            }}
+            onDragEnd={() => {
+              setDragTabKey(null)
+              setDragOverTabKey(null)
+            }}
+          >
+            {item.label}
+          </span>
+        ),
+      }))
 
   const applyPasteRows = async () => {
     const values = await manualForm.validateFields(['table_text'])
@@ -702,6 +869,8 @@ export default function ContractOrdersPage() {
       return
     }
     setManualRows(parsed)
+    setManualFetchStatus('')
+    setCellStates({})
     message.success(`已粘贴${parsed.length}行`)
   }
 
@@ -717,8 +886,20 @@ export default function ContractOrdersPage() {
     message.success(`已粘贴${parsed.length}行`)
   }
 
-  const fetchDalianMaterialInfo = async () => {
-    const requestRows = dalianRows.map((row, index) => ({
+  const fetchMaterialInfoForRows = async (
+    orderNo: string,
+    rows: ManualRow[],
+    setRows: React.Dispatch<React.SetStateAction<ManualRow[]>>,
+    setStates: React.Dispatch<React.SetStateAction<Record<string, CellState>>>,
+    setStatus: React.Dispatch<React.SetStateAction<string>>
+  ) => {
+    const lineCheck = resolveOrderLine(orderNo)
+    if (lineCheck.error) {
+      setStatus(`获取失败（失败原因：${lineCheck.error}）`)
+      message.error(lineCheck.error)
+      return
+    }
+    const requestRows = rows.map((row, index) => ({
       source_index: index,
       drawing_no: row.drawing_no,
       material_no: row.material_no,
@@ -729,11 +910,11 @@ export default function ContractOrdersPage() {
     const validRows = requestRows.filter((row) => String(row.drawing_no || '').trim() && String(row.material_no || '').trim())
     if (validRows.length === 0) {
       const reason = invalidRows.length > 0 ? `第${invalidRows[0].source_index + 1}行${invalidRows[0].reason}` : '没有可获取的物料行'
-      setDalianFetchStatus(`获取失败（失败原因：${reason}）`)
+      setStatus(`获取失败（失败原因：${reason}）`)
       message.error(reason)
       return
     }
-    setDalianFetchStatus('获取中...')
+    setStatus('获取中...')
     const res = await fetch(apiUrl('/api/v1/workflow/materials/lookup'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -742,38 +923,53 @@ export default function ContractOrdersPage() {
     const data = await res.json()
     if (!res.ok) {
       const reason = data.detail || '物料信息获取失败'
-      setDalianFetchStatus(`获取失败（失败原因：${reason}）`)
+      setStatus(`获取失败（失败原因：${reason}）`)
       message.error(reason)
       return
     }
     const missing = [...invalidRows, ...(data.missing || [])]
     const rowsByIndex = new Map<number, MaterialLookupResult>((data.rows || []).map((row: MaterialLookupResult) => [row.source_index, row]))
-    setDalianRows((prev) =>
-      prev.map((row, index) => {
-        const hit = rowsByIndex.get(index)
-        if (!hit) return row
-        return {
-          ...row,
-          name: hit.part_no,
-          spec_model: hit.spec_model,
-          material: hit.material,
-          unit_weight: Number(hit.unit_weight || 0),
-          total_weight: totalWeight(row.quantity, Number(hit.unit_weight || 0)),
-        }
+    const patchByKey = new Map<string, Pick<ManualRow, MaterialFetchField>>()
+    const diffStates: Record<string, CellState> = {}
+    rows.forEach((row, index) => {
+      const hit = rowsByIndex.get(index)
+      if (!hit) return
+      const { next, changedFields } = buildFetchedMaterialPatch(orderNo, row, hit)
+      patchByKey.set(row.key, next)
+      changedFields.forEach((field) => {
+        diffStates[`${row.key}.${field}`] = 'diff'
       })
-    )
+    })
+    setRows((prev) => prev.map((row) => (patchByKey.has(row.key) ? { ...row, ...patchByKey.get(row.key)! } : row)))
+    setStates((prev) => {
+      const cleared = { ...prev }
+      Object.keys(cleared).forEach((key) => {
+        if (cleared[key] === 'diff') delete cleared[key]
+      })
+      return { ...cleared, ...diffStates }
+    })
     if (missing.length > 0) {
       const reason = missing
         .map((row: MaterialLookupMissing) =>
           row.reason ? `第${row.source_index + 1}行(${row.reason})` : `第${row.source_index + 1}行(${row.drawing_no}/${row.material_no})`
         )
         .join('、')
-      setDalianFetchStatus(`获取失败（失败原因：未找到或无法查询${reason}；已提取${data.rows?.length || 0}条）`)
+      setStatus(`获取失败（失败原因：未找到或无法查询${reason}；已提取${data.rows?.length || 0}条）`)
       message.error(`部分物料信息未找到，已提取${data.rows?.length || 0}条`)
       return
     }
-    setDalianFetchStatus(`获取成功（${data.rows?.length || 0}条）`)
+    setStatus(`获取成功（${data.rows?.length || 0}条）`)
     message.success(`获取成功，共${data.rows?.length || 0}条`)
+  }
+
+  const fetchManualMaterialInfo = async () => {
+    const orderNo = String(manualForm.getFieldValue('order_no') || '').trim()
+    await fetchMaterialInfoForRows(orderNo, manualRows, setManualRows, setCellStates, setManualFetchStatus)
+  }
+
+  const fetchDalianMaterialInfo = async () => {
+    const orderNo = String(dalianForm.getFieldValue('order_no') || '').trim()
+    await fetchMaterialInfoForRows(orderNo, dalianRows, setDalianRows, setDalianCellStates, setDalianFetchStatus)
   }
 
   const handleQuery = async () => {
@@ -877,14 +1073,16 @@ export default function ContractOrdersPage() {
       message.error(data.detail || '删除失败')
       return
     }
-    message.success(`已删除${data.deleted_count}条物料`)
+    const packingHint =
+      data.packing_deleted_count > 0 ? `，并同步清除装箱记录 ${data.packing_deleted_count} 条` : ''
+    message.success(`已删除${data.deleted_count}条物料${packingHint}`)
     await handleQuery()
   }
 
   const confirmDeleteQueryRows = (ids: number[]) => {
     Modal.confirm({
       title: '确认删除物料',
-      content: `删除后将同步从订单明细表中移除 ${ids.length} 条记录，是否继续？`,
+      content: `删除后将从订单明细表中移除 ${ids.length} 条记录；若对应物料在订单中已无剩余行，将同步清除装箱记录。是否继续？`,
       onOk: () => deleteQueryRows(ids),
     })
   }
@@ -933,12 +1131,20 @@ export default function ContractOrdersPage() {
       if (!row?.id) continue
       const quantity = Number(row.quantity || 0)
       const unitWeight = Number(hit.unit_weight || 0)
+      const orderNo = String(row.order_no || '')
+      const lineCheck = resolveOrderLine(orderNo)
+      if (lineCheck.error) {
+        updateFailures.push(`id=${row.id}: ${lineCheck.error}`)
+        continue
+      }
       const patch = {
         name: hit.part_no,
         spec_model: hit.spec_model,
         material: hit.material,
         unit_weight: unitWeight,
         total_weight: totalWeight(quantity, unitWeight),
+        agreement_price: resolveAgreementPrice(orderNo, hit),
+        product_unit_price: Number(hit.product_unit_price || 0),
       }
       const summary = `获取物料信息：订单明细 id=${row.id}，图纸号=${String(row.drawing_no || '')}，物料号=${String(row.material_no || '')}`
       const updateRes = await fetch(apiUrl('/api/v1/workflow/orders/detail/update'), {
@@ -1139,6 +1345,8 @@ export default function ContractOrdersPage() {
       render: (v: unknown) =>
         key === 'status' ? (
           <Tag color="blue">{String(v ?? '') || '/'}</Tag>
+        ) : key === 'doc_status' ? (
+          v === '待补资料' ? <Tag color="gold">待补资料</Tag> : '/'
         ) : v === null || v === undefined || v === '' ? (
           '/'
         ) : (
@@ -1299,6 +1507,34 @@ export default function ContractOrdersPage() {
         ),
       },
       {
+        title: '协议价',
+        dataIndex: 'agreement_price',
+        width: manualColWidths.agreement_price,
+        render: (v, row) => (
+          <InputNumber
+            min={0}
+            precision={2}
+            value={v}
+            style={{ width: '100%', ...cellStyle(cellStates, row.key, 'agreement_price') }}
+            onChange={(next) => setCellValue(row.key, 'agreement_price', Number(next || 0))}
+          />
+        ),
+      },
+      {
+        title: '产品单价',
+        dataIndex: 'product_unit_price',
+        width: manualColWidths.product_unit_price,
+        render: (v, row) => (
+          <InputNumber
+            min={0}
+            precision={2}
+            value={v}
+            style={{ width: '100%', ...cellStyle(cellStates, row.key, 'product_unit_price') }}
+            onChange={(next) => setCellValue(row.key, 'product_unit_price', Number(next || 0))}
+          />
+        ),
+      },
+      {
         title: '操作',
         width: manualColWidths.action,
         render: (_, row) => (
@@ -1423,6 +1659,34 @@ export default function ContractOrdersPage() {
         ),
       },
       {
+        title: '协议价',
+        dataIndex: 'agreement_price',
+        width: dalianColWidths.agreement_price,
+        render: (v, row) => (
+          <InputNumber
+            min={0}
+            precision={2}
+            value={v}
+            style={{ width: '100%', ...cellStyle(dalianCellStates, row.key, 'agreement_price') }}
+            onChange={(next) => setDalianCellValue(row.key, 'agreement_price', Number(next || 0))}
+          />
+        ),
+      },
+      {
+        title: '产品单价',
+        dataIndex: 'product_unit_price',
+        width: dalianColWidths.product_unit_price,
+        render: (v, row) => (
+          <InputNumber
+            min={0}
+            precision={2}
+            value={v}
+            style={{ width: '100%', ...cellStyle(dalianCellStates, row.key, 'product_unit_price') }}
+            onChange={(next) => setDalianCellValue(row.key, 'product_unit_price', Number(next || 0))}
+          />
+        ),
+      },
+      {
         title: '备注1',
         dataIndex: 'remark1',
         width: dalianColWidths.remark1,
@@ -1483,9 +1747,15 @@ export default function ContractOrdersPage() {
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card title="合同与订单模块">
         <Tabs
+          className="contract-tabs"
           activeKey={activeTab}
           onChange={handleTabChange}
-          items={[
+          items={makeOrderedTabItems([
+            {
+              key: 'contract-upload',
+              label: '合同上传/下载',
+              children: <ContractArchivePanel />,
+            },
             {
               key: 'manual',
               label: '明细-订单录入',
@@ -1503,11 +1773,20 @@ export default function ContractOrdersPage() {
                         <Select allowClear style={{ width: 320 }} options={customerOptions} />
                       </Form.Item>
                     </Space>
-                    <Form.Item name="table_text" label="可选：粘贴Excel数据(制表符分隔)并点“应用粘贴”">
+                    <Form.Item
+                      name="table_text"
+                      label="可选：粘贴Excel数据(制表符分隔)，列顺序：序号、条目、名称/料号、图纸号、物料号、规格型号、材质、数量、单重、总重、备注1、备注2、协议价、产品单价（名称/料号、规格型号、材质、单重、总重、协议价、产品单价可留空，由「获取物料信息」回填）"
+                    >
                       <Input.TextArea rows={8} />
                     </Form.Item>
-                    <Space>
+                    <Space wrap>
                       <Button onClick={applyPasteRows}>应用粘贴</Button>
+                      <Button type="primary" onClick={fetchManualMaterialInfo}>
+                        获取物料信息
+                      </Button>
+                      {manualFetchStatus ? (
+                        <Tag color={manualFetchStatus.startsWith('获取失败') ? 'red' : manualFetchStatus === '获取中...' ? 'blue' : 'green'}>{manualFetchStatus}</Tag>
+                      ) : null}
                       <Button onClick={() => setManualRows((prev) => [...prev, emptyManualRow(prev.length)])}>追加行</Button>
                       <Button
                         danger
@@ -1524,20 +1803,25 @@ export default function ContractOrdersPage() {
                         onClick={() => {
                           setManualRows([])
                           setSelectedManualKeys([])
+                          setManualFetchStatus('')
+                          setCellStates({})
                         }}
                       >
                         全部删除
                       </Button>
                       <Tag color="red">红色=错误</Tag>
-                      <Tag color="gold">黄色=已修改待提交</Tag>
+                      <Tag color="green">浅绿=已修改待提交</Tag>
+                      <Tag color="blue">浅蓝=获取后与原文不一致</Tag>
+                      <Tag color="orange">浅黄行=待补资料（缺图纸或物料建档）</Tag>
                     </Space>
                     <Table
                       rowKey="key"
                       columns={mergedEditableColumns}
                       dataSource={manualRows}
-                      scroll={{ x: 1800 }}
+                      scroll={{ x: 2300 }}
                       pagination={false}
                       components={{ header: { cell: ResizableTitle } }}
+                      rowClassName={(row) => (row.doc_status === '待补资料' ? 'missing-drawing-row' : '')}
                       rowSelection={{
                         selectedRowKeys: selectedManualKeys,
                         onChange: setSelectedManualKeys,
@@ -1604,15 +1888,18 @@ export default function ContractOrdersPage() {
                         全部删除
                       </Button>
                       <Tag color="red">红色=错误</Tag>
-                      <Tag color="gold">黄色=已修改待提交</Tag>
+                      <Tag color="green">浅绿=已修改待提交</Tag>
+                      <Tag color="blue">浅蓝=获取后与原文不一致</Tag>
+                      <Tag color="orange">浅黄行=待补资料（缺图纸或物料建档）</Tag>
                     </Space>
                     <Table
                       rowKey="key"
                       columns={mergedDalianEditableColumns}
                       dataSource={dalianRows}
-                      scroll={{ x: 1800 }}
+                      scroll={{ x: 2100 }}
                       pagination={false}
                       components={{ header: { cell: ResizableTitle } }}
+                      rowClassName={(row) => (row.doc_status === '待补资料' ? 'missing-drawing-row' : '')}
                       rowSelection={{
                         selectedRowKeys: selectedDalianKeys,
                         onChange: setSelectedDalianKeys,
@@ -1632,6 +1919,7 @@ export default function ContractOrdersPage() {
                 <Space direction="vertical" style={{ width: '100%' }}>
                   <Space>
                     <Tag color="blue">查询总件数：{queryRows.length}</Tag>
+                    <Tag color="orange">浅黄行=待补资料（缺图纸或物料建档）</Tag>
                     {queryMaterialFetchStatus ? (
                       <Tag color={queryMaterialFetchStatus.startsWith('获取失败') ? 'red' : queryMaterialFetchStatus === '获取中...' ? 'blue' : 'green'}>{queryMaterialFetchStatus}</Tag>
                     ) : null}
@@ -1687,6 +1975,7 @@ export default function ContractOrdersPage() {
                     columns={queryDetailColumns}
                     dataSource={queryRows}
                     scroll={{ x: Math.max(3200, queryRows.length ? Object.keys(queryRows[0]).length * 110 : 3200) }}
+                    rowClassName={(row) => (row.doc_status === '待补资料' ? 'missing-drawing-row' : '')}
                     rowSelection={{
                       selectedRowKeys: selectedQueryKeys,
                       onChange: setSelectedQueryKeys,
@@ -1749,7 +2038,7 @@ export default function ContractOrdersPage() {
                 </Space>
               ),
             },
-          ]}
+          ])}
         />
       </Card>
 

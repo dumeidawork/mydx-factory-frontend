@@ -6,6 +6,7 @@
   "common": {
     "login": "登录",
     "logout": "退出",
+    "changePassword": "修改密码",
     "username": "用户名",
     "password": "密码",
     "submit": "提交",
@@ -17,12 +18,14 @@
   "nav": {
     "dashboard": "工作台",
     "contracts": "合同与订单",
+    "manufacturing": "生产",
     "heatTreatment": "热处理与测试",
     "production": "产品建档",
     "finance": "财务管理",
     "qc": "质检",
     "packing": "装箱",
-    "shippingMarks": "打包发货"
+    "shippingMarks": "打包发货",
+    "users": "用户管理"
   },
   "login": {
     "title": "铭远ERP 登录",
