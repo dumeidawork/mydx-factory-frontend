@@ -1,18 +1,23 @@
-import { Card, Radio, Space, Switch, Tabs, Tooltip } from 'antd'
+import { Card, Radio, Space, Switch, Tooltip } from 'antd'
 import { useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import styles from './WorkflowPages.module.css'
 import FranceQcPanel from '../components/FranceQcPanel'
 import DalianQcPanel from '../components/DalianQcPanel'
+import { usePageTitle } from '../layout/usePageTitle'
 
 export type QcOutputFormat = 'word' | 'pdf'
 
 export default function QcWorkbenchPage() {
+  const { pathname } = useLocation()
+  const pageTitle = usePageTitle()
   const [outputFormat, setOutputFormat] = useState<QcOutputFormat>('word')
   const [useUtmtpt, setUseUtmtpt] = useState(false)
+  const isDalian = pathname.endsWith('/dalian')
 
   return (
     <Card
-      title="质检工作台"
+      title={pageTitle}
       className={styles.pageCard}
       extra={
         <Space wrap>
@@ -35,20 +40,11 @@ export default function QcWorkbenchPage() {
         </Space>
       }
     >
-      <Tabs
-        items={[
-          {
-            key: 'france',
-            label: '法国质检',
-            children: <FranceQcPanel outputFormat={outputFormat} useUtmtpt={useUtmtpt} />,
-          },
-          {
-            key: 'dalian',
-            label: '大连质检',
-            children: <DalianQcPanel outputFormat={outputFormat} useUtmtpt={useUtmtpt} />,
-          },
-        ]}
-      />
+      {isDalian ? (
+        <DalianQcPanel outputFormat={outputFormat} useUtmtpt={useUtmtpt} />
+      ) : (
+        <FranceQcPanel outputFormat={outputFormat} useUtmtpt={useUtmtpt} />
+      )}
     </Card>
   )
 }

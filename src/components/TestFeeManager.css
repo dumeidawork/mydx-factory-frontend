@@ -62,7 +62,7 @@
   height: 28px;
   border-radius: 50%;
   color: #fff;
-  background: #1677ff;
+  background: var(--erp-color-primary);
   font-size: 13px;
   font-weight: 700;
 }
@@ -159,8 +159,8 @@
 
 .test-fee-date:focus,
 .test-fee-input:focus {
-  border-color: #1677ff;
-  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+  border-color: var(--erp-color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--erp-color-primary) 12%, transparent);
 }
 
 .test-fee-btn {
@@ -191,7 +191,7 @@
 }
 
 .test-fee-btn.primary {
-  background: #1677ff;
+  background: var(--erp-color-primary);
 }
 
 .test-fee-btn.indigo {

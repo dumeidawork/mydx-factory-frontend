@@ -1,14 +1,18 @@
 import type React from 'react'
-import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Tag } from 'antd'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { Alert, AutoComplete, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import type { TabsProps } from 'antd'
 import { Resizable } from 'react-resizable'
 import 'react-resizable/css/styles.css'
 import { apiUrl } from '../utils/api'
+import { authFetch } from '../utils/auth'
 import { saveGeneratedBlob } from '../utils/clientFileSave'
 import { message } from '../utils/feedback'
 import { askSavePathAndFileName } from '../utils/savePath'
+import { usePageTitle } from '../layout/usePageTitle'
+import { normalizeDrawingInput } from '../utils/specParser'
 import ContractArchivePanel from './ContractArchivePanel'
 import './ContractOrdersPage.css'
 
@@ -43,6 +47,7 @@ type MaterialLookupResult = {
   product_unit_price?: number
   france_agreement_price?: number
   dalian_agreement_price?: number
+  france_tax_inclusive_price?: number
 }
 type MaterialLookupMissing = {
   source_index: number
@@ -64,12 +69,15 @@ type MaterialFetchField = (typeof MATERIAL_FETCH_FIELDS)[number]
 const statusOptions = ['开始', '分割', '加工', '入库', '质检', '再加工', '包装', '装箱', '打包', '发货', '完成']
 const modeOptions = ['本厂钢材', '外来毛胚', '外来成品']
 
-const customerOptions = [
-  { value: 'Siemens S.A.S.', label: 'Siemens S.A.S.' },
-  { value: 'Siemens Sensors＆Communication Ltd.', label: 'Siemens Sensors＆Communication Ltd.' },
-]
+type ContractSection = 'upload' | 'manual' | 'materials' | 'query' | 'split'
 
-const DEFAULT_CONTRACT_TAB_ORDER = ['contract-upload', 'manual', 'dalian', 'query', 'split']
+function contractSectionFromPath(pathname: string): ContractSection {
+  if (pathname.endsWith('/upload')) return 'upload'
+  if (pathname.endsWith('/materials')) return 'materials'
+  if (pathname.endsWith('/query')) return 'query'
+  if (pathname.endsWith('/split')) return 'split'
+  return 'manual'
+}
 
 /** 与后端 ORDER_DETAIL_WRITABLE_FIELDS 一致 */
 const ORDER_DETAIL_WRITABLE_KEYS = [
@@ -124,6 +132,9 @@ const ORDER_DETAIL_DISPLAY_ORDER = [
   'heat_no',
   'heat_treatment_batch_no',
   'status',
+  'planned_arrival_date',
+  'actual_delivery_date',
+  'reservation_status',
   'doc_status',
   'upload_type',
   'material_mode',
@@ -131,11 +142,18 @@ const ORDER_DETAIL_DISPLAY_ORDER = [
   'finished_at',
   'packed_at',
   'shipped_at',
+  'created_by',
   'created_at',
+  'updated_by',
   'updated_at',
 ] as const
 
-const ORDER_DETAIL_DISPLAY_ORDER_SET = new Set<string>(ORDER_DETAIL_DISPLAY_ORDER as unknown as string[])
+const ORDER_DETAIL_HIDDEN_KEYS = ['created_by_user_id', 'updated_by_user_id'] as const
+
+const ORDER_DETAIL_DISPLAY_ORDER_SET = new Set<string>([
+  ...(ORDER_DETAIL_DISPLAY_ORDER as unknown as string[]),
+  ...ORDER_DETAIL_HIDDEN_KEYS,
+])
 
 const ORDER_DETAIL_LABELS: Record<string, string> = {
   id: 'ID',
@@ -161,6 +179,9 @@ const ORDER_DETAIL_LABELS: Record<string, string> = {
   heat_no: '炉号',
   heat_treatment_batch_no: '热处理批号',
   status: '状态',
+  planned_arrival_date: '预定到货日期',
+  actual_delivery_date: '实际发货日期',
+  reservation_status: '预定状态',
   doc_status: '资料状态',
   upload_type: '上传方式',
   material_mode: '生产模式',
@@ -168,8 +189,10 @@ const ORDER_DETAIL_LABELS: Record<string, string> = {
   finished_at: '完成时间',
   packed_at: '装箱时间',
   shipped_at: '发货时间',
-  created_at: '创建时间',
-  updated_at: '更新时间',
+  created_by: '上传者',
+  created_at: '上传时间',
+  updated_by: '更改者',
+  updated_at: '更改时间',
 }
 
 const orderQueryExportColumns = ORDER_DETAIL_DISPLAY_ORDER.map((key) => ({
@@ -372,7 +395,7 @@ function parseTsv(text: string): ManualRow[] {
         seq: Number(cols[0] || idx + 1),
         item_no: cols[1] === '' || cols[1] == null ? undefined : Number(cols[1]),
         name: cols[2] || '',
-        drawing_no: cols[3] || '',
+        drawing_no: normalizeDrawingInput(cols[3] || ''),
         material_no: cols[4] || '',
         spec_model: cols[5] || '',
         material: cols[6] || '',
@@ -399,14 +422,14 @@ function parseDalianTsv(text: string): ManualRow[] {
         seq: Number(cols[0] || idx + 1),
         item_no: cols[1] === '' || cols[1] == null ? undefined : Number(cols[1]),
         name: '',
-        drawing_no: cols[2] || '',
+        drawing_no: normalizeDrawingInput(cols[2] || ''),
         material_no: cols[3] || '',
         spec_model: '',
         material: '',
         quantity: Number(cols[4] || 0),
         unit_weight: 0,
         total_weight: 0,
-        // 协议价、产品单价不从粘贴取得，由「获取物料信息」从物料表回填
+        // 协议价、产品单价不从粘贴取得，由「获取物料信息」从价格拆分表回填
         agreement_price: 0,
         product_unit_price: 0,
         remark1: cols[5] || '',
@@ -435,6 +458,12 @@ function resolveAgreementPrice(orderNo: string, hit: MaterialLookupResult): numb
   return Number(hit.dalian_agreement_price || 0)
 }
 
+function resolveProductUnitPrice(orderNo: string, hit: MaterialLookupResult): number {
+  const { line } = resolveOrderLine(orderNo)
+  if (line === 'france') return Number(hit.france_tax_inclusive_price || 0)
+  return Number(hit.dalian_agreement_price || 0)
+}
+
 function normCompare(value: unknown, numeric: boolean) {
   if (numeric) return Number(value || 0)
   return String(value ?? '').trim()
@@ -449,7 +478,7 @@ function buildFetchedMaterialPatch(orderNo: string, row: ManualRow, hit: Materia
     unit_weight: unitWeight,
     total_weight: totalWeight(row.quantity, unitWeight),
     agreement_price: resolveAgreementPrice(orderNo, hit),
-    product_unit_price: Number(hit.product_unit_price || 0),
+    product_unit_price: resolveProductUnitPrice(orderNo, hit),
   }
   const changedFields: MaterialFetchField[] = []
   MATERIAL_FETCH_FIELDS.forEach((field) => {
@@ -466,6 +495,55 @@ function errorText(detail: unknown, fallback: string) {
   if (typeof detail === 'string') return detail
   if (typeof detail === 'object' && 'message' in detail) return String((detail as { message?: unknown }).message || fallback)
   return fallback
+}
+
+type OrderDetailLogRow = {
+  id: number
+  row_id?: number | null
+  order_no?: string
+  material_no?: string
+  action: string
+  operator_name: string
+  operated_at: string
+  change_summary: string
+}
+
+const ORDER_LOG_ACTION_LABELS: Record<string, string> = {
+  create: '录入',
+  update: '修改',
+  upload: '上传',
+  export: '导出',
+  delete: '删除',
+}
+
+function formatOrderLogSummary(raw: string) {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const fields = parsed.fields as Record<string, { before?: unknown; after?: unknown }> | undefined
+    if (fields && Object.keys(fields).length) {
+      return Object.entries(fields)
+        .slice(0, 8)
+        .map(([key, value]) => `${ORDER_DETAIL_LABELS[key] || key}: ${value?.before ?? ''} → ${value?.after ?? ''}`)
+        .join('；')
+    }
+    if (parsed.op === 'export') {
+      return `导出 ${parsed.file_name || ''}，${parsed.count ?? 0} 条`
+    }
+    if (parsed.op === 'append') {
+      return `追加明细 id=${parsed.id ?? ''}，参照 ${parsed.based_on_id ?? ''}，物料号 ${parsed.material_no ?? ''}`
+    }
+    if (parsed.op === 'delete') {
+      const snap = (parsed.snapshot || {}) as Record<string, unknown>
+      return `删除 id=${snap.id ?? ''}，订单 ${snap.order_no ?? ''}，物料号 ${snap.material_no ?? ''}`
+    }
+    if (parsed.confirm_summary) return String(parsed.confirm_summary)
+    const materialNo = parsed.material_no ? `物料号 ${parsed.material_no}` : ''
+    const orderNo = parsed.order_no ? `订单 ${parsed.order_no}` : ''
+    return [orderNo, materialNo].filter(Boolean).join('，') || raw
+  } catch {
+    return raw
+  }
 }
 
 function emptyManualRow(index: number): ManualRow {
@@ -562,6 +640,11 @@ function OrderDetailWritableFormItems({ seqExtra }: { seqExtra?: string }) {
 }
 
 export default function ContractOrdersPage() {
+  const { t } = useTranslation()
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const pageTitle = usePageTitle()
+  const section = contractSectionFromPath(pathname)
   const [queryRows, setQueryRows] = useState<AnyRow[]>([])
   const [splitRows, setSplitRows] = useState<AnyRow[]>([])
   const [warning, setWarning] = useState('')
@@ -573,10 +656,6 @@ export default function ContractOrdersPage() {
   const [selectedDalianKeys, setSelectedDalianKeys] = useState<React.Key[]>([])
   const [selectedQueryKeys, setSelectedQueryKeys] = useState<React.Key[]>([])
   const [selectedSplitKeys, setSelectedSplitKeys] = useState<React.Key[]>([])
-  const [activeTab, setActiveTab] = useState('manual')
-  const [tabOrder, setTabOrder] = useState(DEFAULT_CONTRACT_TAB_ORDER)
-  const [dragTabKey, setDragTabKey] = useState<string | null>(null)
-  const [dragOverTabKey, setDragOverTabKey] = useState<string | null>(null)
   const [manualFetchStatus, setManualFetchStatus] = useState('')
   const [dalianFetchStatus, setDalianFetchStatus] = useState('')
   const [queryMaterialFetchStatus, setQueryMaterialFetchStatus] = useState('')
@@ -615,6 +694,7 @@ export default function ContractOrdersPage() {
     action: 90,
   })
 
+  const [customerOptions, setCustomerOptions] = useState<{ value: string; label: string }[]>([])
   const [manualForm] = Form.useForm()
   const [dalianForm] = Form.useForm()
   const [queryForm] = Form.useForm()
@@ -628,6 +708,11 @@ export default function ContractOrdersPage() {
   const [detailAppendBase, setDetailAppendBase] = useState<AnyRow | null>(null)
   const [isXlsxLoaded, setIsXlsxLoaded] = useState(false)
   const [queryExportModalOpen, setQueryExportModalOpen] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
+  const [logLoading, setLogLoading] = useState(false)
+  const [logRows, setLogRows] = useState<OrderDetailLogRow[]>([])
+  const [logOrderNo, setLogOrderNo] = useState('')
+  const [logMaterialNo, setLogMaterialNo] = useState('')
   const [queryExportColumnKeys, setQueryExportColumnKeys] = useState<string[]>(
     orderQueryExportColumns.map((col) => col.key)
   )
@@ -642,6 +727,23 @@ export default function ContractOrdersPage() {
       if (script.parentNode) script.parentNode.removeChild(script)
     }
   }, [])
+
+  const loadCustomers = useCallback(async (q = '') => {
+    try {
+      const res = await authFetch(
+        apiUrl(`/api/v1/contract-archives/customers/suggest?q=${encodeURIComponent(q)}&limit=50`),
+      )
+      const data = (await res.json()) as { items?: string[] }
+      if (!res.ok) return
+      setCustomerOptions((data.items || []).map((name) => ({ value: name, label: name })))
+    } catch {
+      /* ignore suggest errors */
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadCustomers('')
+  }, [loadCustomers])
 
   const setCellValue = <K extends keyof ManualRow>(rowKey: string, field: K, value: ManualRow[K]) => {
     setManualRows((prev) => prev.map((r) => (r.key === rowKey ? { ...r, [field]: value } : r)))
@@ -722,7 +824,7 @@ export default function ContractOrdersPage() {
     const state = states[`${rowKey}.${String(field)}`] || 'normal'
     if (state === 'error') return { background: '#fff1f0', borderColor: '#ff4d4f' }
     if (state === 'fixed') return { background: '#f6ffed', borderColor: '#52c41a' }
-    if (state === 'diff') return { background: '#e6f4ff', borderColor: '#1677ff' }
+    if (state === 'diff') return { background: 'var(--erp-color-primary-bg)', borderColor: 'var(--erp-color-primary)' }
     return {}
   }
 
@@ -751,7 +853,7 @@ export default function ContractOrdersPage() {
         seq: r.seq,
         item_no: r.item_no,
         name: r.name,
-        drawing_no: r.drawing_no,
+        drawing_no: normalizeDrawingInput(r.drawing_no),
         material_no: r.material_no,
         spec_model: r.spec_model,
         material: r.material,
@@ -764,7 +866,7 @@ export default function ContractOrdersPage() {
         remark2: r.remark2,
       })),
     }
-    const res = await fetch(apiUrl('/api/v1/workflow/orders/manual'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/orders/manual'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -791,6 +893,7 @@ export default function ContractOrdersPage() {
       }))
     )
     onSuccess?.()
+    void loadCustomers('')
     const pending = Number(data.pending_docs_count || 0)
     if (pending > 0) {
       message.warning(`提交成功，共${data.count}条；其中 ${pending} 条缺少图纸或物料建档，已标记「待补资料」`)
@@ -807,59 +910,11 @@ export default function ContractOrdersPage() {
     await submitOrderRows(dalianForm, dalianRows, setDalianRows, setDalianCellStates, () => setDalianFetchStatus(''))
   }
 
-  const handleTabChange = (key: string) => {
-    if (activeTab === 'manual') setManualFetchStatus('')
-    if (activeTab === 'dalian') setDalianFetchStatus('')
-    if (activeTab === 'query') setQueryMaterialFetchStatus('')
-    setActiveTab(key)
-  }
-
-  const makeOrderedTabItems = (items: NonNullable<TabsProps['items']>) =>
-    tabOrder
-      .map((key) => items.find((item) => item?.key === key))
-      .filter((item): item is NonNullable<typeof item> => Boolean(item))
-      .map((item) => ({
-        ...item,
-        label: (
-          <span
-            className={`contract-tab-label${dragTabKey === item.key ? ' contract-tab-label--dragging' : ''}${dragOverTabKey === item.key ? ' contract-tab-label--drag-over' : ''}`}
-            draggable
-            onDragStart={(e) => {
-              setDragTabKey(String(item.key))
-              e.dataTransfer.effectAllowed = 'move'
-            }}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setDragOverTabKey(String(item.key))
-            }}
-            onDragLeave={() => setDragOverTabKey(null)}
-            onDrop={(e) => {
-              e.preventDefault()
-              const sourceKey = dragTabKey
-              const targetKey = String(item.key)
-              if (sourceKey && sourceKey !== targetKey) {
-                setTabOrder((prev) => {
-                  const next = [...prev]
-                  const fromIdx = next.indexOf(sourceKey)
-                  const toIdx = next.indexOf(targetKey)
-                  if (fromIdx < 0 || toIdx < 0) return prev
-                  next.splice(fromIdx, 1)
-                  next.splice(toIdx, 0, sourceKey)
-                  return next
-                })
-              }
-              setDragTabKey(null)
-              setDragOverTabKey(null)
-            }}
-            onDragEnd={() => {
-              setDragTabKey(null)
-              setDragOverTabKey(null)
-            }}
-          >
-            {item.label}
-          </span>
-        ),
-      }))
+  useEffect(() => {
+    setManualFetchStatus('')
+    setDalianFetchStatus('')
+    setQueryMaterialFetchStatus('')
+  }, [section])
 
   const applyPasteRows = async () => {
     const values = await manualForm.validateFields(['table_text'])
@@ -901,8 +956,9 @@ export default function ContractOrdersPage() {
     }
     const requestRows = rows.map((row, index) => ({
       source_index: index,
-      drawing_no: row.drawing_no,
+      drawing_no: normalizeDrawingInput(row.drawing_no),
       material_no: row.material_no,
+      part_no: row.name,
     }))
     const invalidRows = requestRows
       .filter((row) => !String(row.drawing_no || '').trim() || !String(row.material_no || '').trim())
@@ -975,7 +1031,7 @@ export default function ContractOrdersPage() {
   const handleQuery = async () => {
     setQueryMaterialFetchStatus('')
     const values = await queryForm.validateFields()
-    const res = await fetch(apiUrl('/api/v1/workflow/orders/query'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/orders/query'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(values),
@@ -993,6 +1049,24 @@ export default function ContractOrdersPage() {
     setQueryRows(flat)
     setSelectedQueryKeys([])
     if (data.warning) message.warning(data.warning)
+  }
+
+  const loadOrderLogs = async (orderNo = logOrderNo, materialNo = logMaterialNo) => {
+    setLogLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (orderNo.trim()) params.set('order_no', orderNo.trim())
+      if (materialNo.trim()) params.set('material_no', materialNo.trim())
+      const res = await authFetch(apiUrl(`/api/v1/workflow/orders/logs?${params.toString()}`))
+      const data = await res.json()
+      if (!res.ok) {
+        message.error(data.detail || '操作日志加载失败')
+        return
+      }
+      setLogRows((data.rows || []) as OrderDetailLogRow[])
+    } finally {
+      setLogLoading(false)
+    }
   }
 
   const formatQueryExportCell = (row: AnyRow, colKey: string) => {
@@ -1053,6 +1127,18 @@ export default function ContractOrdersPage() {
       setQueryExportSaveDir(saveInfo.directoryPath)
       setQueryExportModalOpen(false)
       message.success(`已导出 ${queryRows.length} 条：${savedPath}`)
+      const orderNos = [...new Set(queryRows.map((row) => String(row.order_no || '')).filter(Boolean))]
+      const materialNos = [...new Set(queryRows.map((row) => String(row.material_no || '')).filter(Boolean))]
+      await authFetch(apiUrl('/api/v1/workflow/orders/export-log'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_name: saveInfo.fileName,
+          count: queryRows.length,
+          order_nos: orderNos,
+          material_nos: materialNos,
+        }),
+      })
     } catch (err) {
       message.error(err instanceof Error ? err.message : '导出失败')
     }
@@ -1063,7 +1149,7 @@ export default function ContractOrdersPage() {
       message.warning('请先勾选要删除的物料')
       return
     }
-    const res = await fetch(apiUrl('/api/v1/workflow/orders/delete'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/orders/delete'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
@@ -1094,8 +1180,9 @@ export default function ContractOrdersPage() {
     }
     const requestRows = targetRows.map((row, index) => ({
       source_index: index,
-      drawing_no: String(row.drawing_no || ''),
+      drawing_no: normalizeDrawingInput(String(row.drawing_no || '')),
       material_no: String(row.material_no || ''),
+      part_no: String(row.name || ''),
     }))
     const invalidRows: MaterialLookupMissing[] = requestRows
       .filter((row) => !row.drawing_no.trim() || !row.material_no.trim())
@@ -1144,10 +1231,10 @@ export default function ContractOrdersPage() {
         unit_weight: unitWeight,
         total_weight: totalWeight(quantity, unitWeight),
         agreement_price: resolveAgreementPrice(orderNo, hit),
-        product_unit_price: Number(hit.product_unit_price || 0),
+        product_unit_price: resolveProductUnitPrice(orderNo, hit),
       }
       const summary = `获取物料信息：订单明细 id=${row.id}，图纸号=${String(row.drawing_no || '')}，物料号=${String(row.material_no || '')}`
-      const updateRes = await fetch(apiUrl('/api/v1/workflow/orders/detail/update'), {
+      const updateRes = await authFetch(apiUrl('/api/v1/workflow/orders/detail/update'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1214,7 +1301,7 @@ export default function ContractOrdersPage() {
       width: 640,
       content: <pre style={{ whiteSpace: 'pre-wrap', margin: 0, maxHeight: 360, overflow: 'auto' }}>{summary}</pre>,
       onOk: async () => {
-        const res = await fetch(apiUrl('/api/v1/workflow/orders/detail/update'), {
+        const res = await authFetch(apiUrl('/api/v1/workflow/orders/detail/update'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1259,7 +1346,7 @@ export default function ContractOrdersPage() {
       width: 520,
       content: <div>{summary}</div>,
       onOk: async () => {
-        const res = await fetch(apiUrl('/api/v1/workflow/orders/detail/append'), {
+        const res = await authFetch(apiUrl('/api/v1/workflow/orders/detail/append'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1285,7 +1372,7 @@ export default function ContractOrdersPage() {
   }
 
   const loadSplitRows = async (orderNo: string) => {
-    const res = await fetch(apiUrl('/api/v1/workflow/orders/query'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/orders/query'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ order_no: orderNo }),
@@ -1316,7 +1403,7 @@ export default function ContractOrdersPage() {
       selected_material_nos: selected,
       assign_mode: values.assign_mode,
     }
-    const res = await fetch(apiUrl('/api/v1/workflow/orders/split'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/orders/split'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -1424,7 +1511,13 @@ export default function ContractOrdersPage() {
         dataIndex: 'drawing_no',
         width: manualColWidths.drawing_no,
         render: (v, row) => (
-          <Input value={v} style={cellStyle(cellStates, row.key, 'drawing_no')} onChange={(e) => setCellValue(row.key, 'drawing_no', e.target.value)} />
+          <Input
+            value={v}
+            placeholder="A5E… Rev017 或 A5E…-017"
+            style={cellStyle(cellStates, row.key, 'drawing_no')}
+            onChange={(e) => setCellValue(row.key, 'drawing_no', e.target.value)}
+            onBlur={(e) => setCellValue(row.key, 'drawing_no', normalizeDrawingInput(e.target.value))}
+          />
         ),
       },
       {
@@ -1586,7 +1679,13 @@ export default function ContractOrdersPage() {
         dataIndex: 'drawing_no',
         width: dalianColWidths.drawing_no,
         render: (v, row) => (
-          <Input value={v} style={cellStyle(dalianCellStates, row.key, 'drawing_no')} onChange={(e) => setDalianCellValue(row.key, 'drawing_no', e.target.value)} />
+          <Input
+            value={v}
+            placeholder="A5E… Rev017 或 A5E…-017"
+            style={cellStyle(dalianCellStates, row.key, 'drawing_no')}
+            onChange={(e) => setDalianCellValue(row.key, 'drawing_no', e.target.value)}
+            onBlur={(e) => setDalianCellValue(row.key, 'drawing_no', normalizeDrawingInput(e.target.value))}
+          />
         ),
       },
       {
@@ -1745,23 +1844,20 @@ export default function ContractOrdersPage() {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Card title="合同与订单模块">
-        <Tabs
-          className="contract-tabs"
-          activeKey={activeTab}
-          onChange={handleTabChange}
-          items={makeOrderedTabItems([
-            {
-              key: 'contract-upload',
-              label: '合同上传/下载',
-              children: <ContractArchivePanel />,
-            },
-            {
-              key: 'manual',
-              label: '明细-订单录入',
-              children: (
+      <Card title={pageTitle}>
+        {section === 'upload' && <ContractArchivePanel />}
+        {(section === 'manual' || section === 'materials') && (
+          <Tabs
+            className="contract-tabs"
+            activeKey={section}
+            onChange={(key) => navigate(`/contracts/${key}`)}
+            items={[
+              {
+                key: 'manual',
+                label: t('nav.contractsManual'),
+                children: (
                 <Space direction="vertical" style={{ width: '100%' }}>
-                  <Form form={manualForm} layout="vertical" initialValues={{ customer: 'Siemens S.A.S.' }}>
+                  <Form form={manualForm} layout="vertical">
                     <Space wrap>
                       <Form.Item name="order_no" label="订单号" rules={[{ required: true }]}>
                         <Input />
@@ -1770,12 +1866,19 @@ export default function ContractOrdersPage() {
                         <Input />
                       </Form.Item>
                       <Form.Item name="customer" label="客户">
-                        <Select allowClear style={{ width: 320 }} options={customerOptions} />
+                        <AutoComplete
+                          style={{ width: 320 }}
+                          options={customerOptions}
+                          onSearch={(q) => void loadCustomers(q)}
+                          placeholder="请输入或选择客户"
+                          allowClear
+                          filterOption={false}
+                        />
                       </Form.Item>
                     </Space>
                     <Form.Item
                       name="table_text"
-                      label="可选：粘贴Excel数据(制表符分隔)，列顺序：序号、条目、名称/料号、图纸号、物料号、规格型号、材质、数量、单重、总重、备注1、备注2、协议价、产品单价（名称/料号、规格型号、材质、单重、总重、协议价、产品单价可留空，由「获取物料信息」回填）"
+                      label="可选：粘贴Excel数据(制表符分隔)，列顺序：序号、条目、名称/料号、图纸号、物料号、规格型号、材质、数量、单重、总重、备注1、备注2、协议价、产品单价（名称/料号、规格型号、材质、单重、总重、协议价、产品单价可留空；协议价/产品单价由「获取物料信息」按价格拆分表回填）"
                     >
                       <Input.TextArea rows={8} />
                     </Form.Item>
@@ -1832,18 +1935,17 @@ export default function ContractOrdersPage() {
                     </Button>
                   </Form>
                 </Space>
-              ),
-            },
-            {
-              key: 'dalian',
-              label: '物料-订单录入',
-              children: (
+                ),
+              },
+              {
+                key: 'materials',
+                label: t('nav.contractsMaterials'),
+                children: (
                 <Space direction="vertical" style={{ width: '100%' }}>
-                  <Form
-                    form={dalianForm}
-                    layout="vertical"
-                    initialValues={{ customer: 'Siemens Sensors＆Communication Ltd.' }}
-                  >
+                    <Form
+                      form={dalianForm}
+                      layout="vertical"
+                    >
                     <Space wrap>
                       <Form.Item name="order_no" label="订单号" rules={[{ required: true }]}>
                         <Input />
@@ -1852,7 +1954,14 @@ export default function ContractOrdersPage() {
                         <Input />
                       </Form.Item>
                       <Form.Item name="customer" label="客户">
-                        <Select allowClear style={{ width: 320 }} options={customerOptions} />
+                        <AutoComplete
+                          style={{ width: 320 }}
+                          options={customerOptions}
+                          onSearch={(q) => void loadCustomers(q)}
+                          placeholder="请输入或选择客户"
+                          allowClear
+                          filterOption={false}
+                        />
                       </Form.Item>
                     </Space>
                     <Form.Item name="table_text" label="可选：粘贴Excel数据(制表符分隔)，列顺序：序号、条目、图纸号、物料号、数量、备注1、备注2">
@@ -1910,12 +2019,12 @@ export default function ContractOrdersPage() {
                     </Button>
                   </Form>
                 </Space>
-              ),
-            },
-            {
-              key: 'query',
-              label: '订单查询',
-              children: (
+                ),
+              },
+            ]}
+          />
+        )}
+        {section === 'query' && (
                 <Space direction="vertical" style={{ width: '100%' }}>
                   <Space>
                     <Tag color="blue">查询总件数：{queryRows.length}</Tag>
@@ -1968,6 +2077,18 @@ export default function ContractOrdersPage() {
                     >
                       导出 Excel
                     </Button>
+                    <Button
+                      onClick={() => {
+                        const orderNo = String(queryForm.getFieldValue('order_no') || '')
+                        const materialNo = String(queryForm.getFieldValue('material_no') || '')
+                        setLogOrderNo(orderNo)
+                        setLogMaterialNo(materialNo)
+                        setLogOpen(true)
+                        void loadOrderLogs(orderNo, materialNo)
+                      }}
+                    >
+                      操作日志
+                    </Button>
                   </Form>
                   {warning && <Alert type="warning" message={warning} />}
                   <Table
@@ -1982,12 +2103,8 @@ export default function ContractOrdersPage() {
                     }}
                   />
                 </Space>
-              ),
-            },
-            {
-              key: 'split',
-              label: '分割订单',
-              children: (
+        )}
+        {section === 'split' && (
                 <Space direction="vertical" style={{ width: '100%' }}>
                   <Form form={splitForm} layout="inline">
                     <Form.Item name="order_no" label="订单号" rules={[{ required: true }]}>
@@ -2036,10 +2153,7 @@ export default function ContractOrdersPage() {
                     }}
                   />
                 </Space>
-              ),
-            },
-          ])}
-        />
+        )}
       </Card>
 
       <Modal
@@ -2092,6 +2206,59 @@ export default function ContractOrdersPage() {
           </Button>
         </div>
       </Modal>
+
+      <Drawer title="订单明细操作日志" open={logOpen} onClose={() => setLogOpen(false)} width={920}>
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Space wrap>
+            <Input
+              placeholder="按订单号筛选"
+              value={logOrderNo}
+              onChange={(e) => setLogOrderNo(e.target.value)}
+              style={{ width: 200 }}
+            />
+            <Input
+              placeholder="按物料号筛选"
+              value={logMaterialNo}
+              onChange={(e) => setLogMaterialNo(e.target.value)}
+              style={{ width: 200 }}
+            />
+            <Button onClick={() => void loadOrderLogs()}>查询</Button>
+            <Button
+              onClick={() => {
+                setLogOrderNo('')
+                setLogMaterialNo('')
+                void loadOrderLogs('', '')
+              }}
+            >
+              显示全部
+            </Button>
+          </Space>
+          <Table
+            rowKey="id"
+            size="small"
+            loading={logLoading}
+            dataSource={logRows}
+            pagination={{ pageSize: 20, showTotal: (total) => `共 ${total} 条` }}
+            columns={[
+              { title: '时间', dataIndex: 'operated_at', width: 170 },
+              { title: '操作人', dataIndex: 'operator_name', width: 100 },
+              {
+                title: '动作',
+                dataIndex: 'action',
+                width: 80,
+                render: (value: string) => ORDER_LOG_ACTION_LABELS[value] || value,
+              },
+              { title: '订单号', dataIndex: 'order_no', width: 140 },
+              { title: '物料号', dataIndex: 'material_no', width: 140 },
+              {
+                title: '变更内容',
+                dataIndex: 'change_summary',
+                render: (value: string) => formatOrderLogSummary(value),
+              },
+            ]}
+          />
+        </Space>
+      </Drawer>
 
       <Modal
         title="追加订单明细"

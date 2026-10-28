@@ -2,7 +2,9 @@ import type { Dispatch, SetStateAction } from 'react'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { Button, Input, InputNumber, Modal, Space } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import styles from '../pages/WorkflowPages.module.css'
 import { apiUrl } from '../utils/api'
+import { authFetch } from '../utils/auth'
 import { message } from '../utils/feedback'
 
 export type QcListRow = Record<string, unknown>
@@ -110,7 +112,7 @@ export async function saveQcListRowQty(row: QcListRow, qty: number): Promise<boo
 }
 
 export async function copyQcListRow(row: QcListRow, reload: () => Promise<void>) {
-  const res = await fetch(apiUrl('/api/v1/workflow/orders/detail/append'), {
+  const res = await authFetch(apiUrl('/api/v1/workflow/orders/detail/append'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -134,7 +136,7 @@ export function deleteQcListRow(row: QcListRow, reload: () => Promise<void>) {
     title: '确认删除',
     content: `确定删除 order_details 表中 id 为 ${rowId} 的记录吗？若该订单号+物料号+条目已无剩余订单行，将同步清除对应装箱记录。`,
     onOk: async () => {
-      const res = await fetch(apiUrl(`/api/v1/workflow/orders/detail/${rowId}`), { method: 'DELETE' })
+      const res = await authFetch(apiUrl(`/api/v1/workflow/orders/detail/${rowId}`), { method: 'DELETE' })
       const data = await res.json()
       if (!res.ok) {
         message.error(typeof data.detail === 'string' ? data.detail : '删除失败')
@@ -157,6 +159,7 @@ type BuildQcListColumnsOptions = {
   savedCertNo?: Record<number, string>
   setSavedCertNo?: Dispatch<SetStateAction<Record<number, string>>>
   confirmedDateText?: string
+  confirmedDateForRow?: (row: QcListRow) => string
   listMode?: QcListMode
 }
 
@@ -171,6 +174,7 @@ export function buildQcListColumns({
   savedCertNo,
   setSavedCertNo,
   confirmedDateText = '',
+  confirmedDateForRow,
   listMode = 'pending',
 }: BuildQcListColumnsOptions): ColumnsType<QcListRow> {
   const isGenerated = listMode === 'generated'
@@ -185,9 +189,21 @@ export function buildQcListColumns({
         }
         const rowId = Number(row.id)
         const displayQty = pendingQty[rowId] ?? Number(row.quantity ?? 0)
+        const trialMissing = Boolean(row.trial_data_missing)
+        const chemicalMissing = Boolean(row.chemical_data_missing)
+        const dataMissing = trialMissing || chemicalMissing
+        const missingHints: string[] = []
+        if (trialMissing) missingHints.push('试验记录缺失')
+        if (chemicalMissing) missingHints.push('化学分析数据缺失')
         return (
           <Space wrap size="small">
-            <Button type="primary" size="small" onClick={() => onEnter(row)}>
+            <Button
+              type="primary"
+              size="small"
+              className={dataMissing ? styles.qcEnterMissingButton : undefined}
+              title={dataMissing ? missingHints.join('；') : undefined}
+              onClick={() => onEnter(row)}
+            >
               进入质检中
             </Button>
             <Button size="small" onClick={() => copyQcListRow(row, reload)}>
@@ -208,16 +224,17 @@ export function buildQcListColumns({
                     return next
                   })
                 }
+                const rowDateText = confirmedDateForRow?.(row) || confirmedDateText
                 if (
                   pendingCertNo &&
                   setPendingCertNo &&
                   savedCertNo &&
                   setSavedCertNo &&
-                  confirmedDateText &&
+                  rowDateText &&
                   rowId in pendingCertNo
                 ) {
                   const certText = pendingCertNo[rowId] ?? ''
-                  const okCert = await saveQcListRowCertificateNo(row, certText, confirmedDateText)
+                  const okCert = await saveQcListRowCertificateNo(row, certText, rowDateText)
                   if (okCert) {
                     setSavedCertNo((prev) => ({ ...prev, [rowId]: certText }))
                     setPendingCertNo((prev) => {

@@ -1,0 +1,8 @@
+.multiDrawingRow td {
+  background: #e6f4ff !important;
+}
+
+.warningCell {
+  color: #d4380d;
+  font-size: 12px;
+}

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, notification } from 'antd'
+import { Button, Card, Collapse, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, notification } from 'antd'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import styles from '../pages/WorkflowPages.module.css'
@@ -401,9 +401,50 @@ export default function FranceQcPanel({
     await batchLiveGenerate(selectedRows)
   }
 
+  const guide = (
+    <Collapse
+      className={styles.opGuide}
+      defaultActiveKey={[]}
+      items={[
+        {
+          key: 'guide',
+          label: '操作说明',
+          children: (
+            <div className={styles.opGuideBody}>
+              <div className={styles.opGuideBlock}>
+                <div className={styles.opGuideLabel}>操作步骤</div>
+                <ol className={styles.opGuideList}>
+                  <li>页顶选择 Word 或 PDF。A105 需要带超声、磁粉、渗透的模板时，打开【UTMTPT 版本】。</li>
+                  <li>填写订单号、物料号或状态，点【加载待质检列表】。不选状态时，不显示「开始」「分割」「加工」。</li>
+                  <li>点【进入质检中】核对客户、合同号、出厂日期和证书编号。机械性能和化学成分从热处理带出，本页不能改。数量可改，改完点【保存】。</li>
+                  <li>点【保存质检记录】，再点【生成质保书并导出】，选择本机保存目录。</li>
+                  <li>批量时先勾选物料，在列表上选出厂日期，再点【批量生成质检书】。整批使用这一个日期。粉色行表示已经出过质保书，可选择按历史快照重生成，或按当前数据生成新的。</li>
+                  <li>点【查询】查看已生成的质保书。订单号、物料号、状态至少填一项，然后可【批量重生成质保书】。</li>
+                </ol>
+              </div>
+              <div className={styles.opGuideBlock}>
+                <div className={styles.opGuideLabel}>注意事项</div>
+                <ul className={`${styles.opGuideList} ${styles.opGuideNotes}`}>
+                  <li>本页只做订单号以 2 开头的法国订单。大连订单请到【质检/大连质检】。</li>
+                  <li>证书编号形如 ZYXMZ订单号-条目。同一订单、同一物料、同一条目有多行时，末尾再加 -1、-2。编号里不含出厂日期。</li>
+                  <li>进入质检中若提示试验记录或化学分析缺失，先到热处理补数据，再生成质保书。</li>
+                  <li>列表里改过数量后，要先点该行【保存】，再批量生成。</li>
+                  <li>【复制】会新增一条订单明细。【删除】会删除这条订单明细；若该订单号、物料号、条目已无剩余行，对应装箱记录一并清除。</li>
+                  <li>按历史快照重生成不读取最新炉号和试验数据。按当前数据生成会用现在的订单和热处理数据，并更新已保存的质保书。</li>
+                  <li>本页不把订单状态改成发货。</li>
+                </ul>
+              </div>
+            </div>
+          ),
+        },
+      ]}
+    />
+  )
+
   if (mode === 'list') {
     return (
       <>
+        {guide}
         <Form form={form} layout="vertical">
           <Space wrap align="start" className={styles.qcListFilterRow}>
             <Form.Item name="query_order_no" label="订单号">
@@ -477,6 +518,9 @@ export default function FranceQcPanel({
                 String(row.heat_treatment_batch_no || '')
               ),
             extraColumns: [
+              ...(listMode === 'pending'
+                ? [{ title: 'ID', dataIndex: 'id', width: 80 } as const]
+                : []),
               { title: '订单号', dataIndex: 'order_no' },
               { title: '物料号', dataIndex: 'material_no' },
               { title: '图纸号', dataIndex: 'drawing_no', render: (v?: string) => v || '-' },
@@ -516,6 +560,7 @@ export default function FranceQcPanel({
       extra={<QcBackToListButton onClick={() => setMode('list')} />}
       className={styles.pageCard}
     >
+      {guide}
       <Form form={form} layout="vertical">
         <Card size="small" title="模块一：基础与合同信息" className={styles.sectionCard}>
           <Space wrap>

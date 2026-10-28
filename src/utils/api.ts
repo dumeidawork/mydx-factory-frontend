@@ -6,10 +6,21 @@ export const REQUEST_TIMEOUT_MS = 3 * 60 * 1000
 export const MAX_RECONNECT_ATTEMPTS = 3
 const RECONNECT_DELAY_MS = 1000
 const PROBE_TIMEOUT_MS = 8000
+/**
+ * 开发服务异常退出后大约 2 秒才会被重新拉起。
+ * 后台健康检查已经通过时，先等这一轮再重试业务请求。
+ */
+const CHANNEL_RETRY_DELAY_MS = 3000
+/** 判定后台不可达后，短时间内不再重复探测，避免轮询把失败放大。 */
+const GAVE_UP_COOLDOWN_MS = 3000
+const BACKEND_DOWN_MESSAGE = '服务器连接失败，已重试 3 次仍未连通，请确认后台是否运行'
+const CHANNEL_INTERRUPTED_MESSAGE = '请求未完成。后台可以连通，请再试一次'
+const REQUEST_TIMEOUT_MESSAGE = '请求超时。后台可以连通，请稍后再试'
 
 let globalFetchGuardInstalled = false
 let connectionFailureNotified = false
 let connectionGaveUp = false
+let connectionGaveUpAt = 0
 let sharedRecovery: Promise<boolean> | null = null
 
 class FetchAttemptError extends Error {
@@ -27,7 +38,18 @@ class FetchAttemptError extends Error {
 function resetConnectionFailureNotice() {
   connectionFailureNotified = false
   connectionGaveUp = false
+  connectionGaveUpAt = 0
   sharedRecovery = null
+}
+
+function giveUpBackend() {
+  connectionGaveUp = true
+  connectionGaveUpAt = Date.now()
+  notifyConnectionFailureOnce(BACKEND_DOWN_MESSAGE)
+}
+
+function isGaveUpCoolingDown() {
+  return connectionGaveUp && Date.now() - connectionGaveUpAt < GAVE_UP_COOLDOWN_MS
 }
 
 function notifyConnectionFailureOnce(text: string) {
@@ -78,7 +100,7 @@ function markFetchGuardHandled(error: unknown) {
 }
 
 function createConnectionGaveUpError() {
-  const error = new Error('服务器连接已断开，请检查后台服务后刷新页面')
+  const error = new Error('服务器连接已断开，请确认后台是否运行后再试')
   markFetchGuardHandled(error)
   return error
 }
@@ -125,6 +147,7 @@ async function runSharedRecovery(originalFetch: typeof window.fetch): Promise<bo
     for (let attempt = 1; attempt <= MAX_RECONNECT_ATTEMPTS; attempt += 1) {
       if (await probeBackend(originalFetch)) {
         connectionGaveUp = false
+        connectionGaveUpAt = 0
         connectionFailureNotified = false
         return true
       }
@@ -132,8 +155,7 @@ async function runSharedRecovery(originalFetch: typeof window.fetch): Promise<bo
         await sleep(RECONNECT_DELAY_MS * attempt)
       }
     }
-    connectionGaveUp = true
-    notifyConnectionFailureOnce('服务器连接失败，已重试 3 次仍未连通，请确认后台是否运行')
+    giveUpBackend()
     return false
   })().finally(() => {
     sharedRecovery = null
@@ -164,14 +186,23 @@ async function fetchOnce(
   }
 }
 
+function failHandled(error: unknown): never {
+  markFetchGuardHandled(error)
+  throw error
+}
+
 export function installGlobalFetchGuard() {
   if (globalFetchGuardInstalled || typeof window === 'undefined') return
   globalFetchGuardInstalled = true
   const originalFetch = window.fetch.bind(window)
 
   window.fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    if (connectionGaveUp) {
+    if (isGaveUpCoolingDown()) {
       throw createConnectionGaveUpError()
+    }
+    if (connectionGaveUp) {
+      connectionGaveUp = false
+      connectionGaveUpAt = 0
     }
 
     const execute = async () => {
@@ -181,10 +212,48 @@ export function installGlobalFetchGuard() {
         if (!(error instanceof FetchAttemptError)) throw error
         const { original, timedOut } = error
         if (!isRetryableFailure(original, timedOut, init)) {
-          markFetchGuardHandled(original)
-          throw original
+          failHandled(original)
         }
         throw error
+      }
+    }
+
+    const retryAfterBackendConfirmed = async () => {
+      try {
+        const response = await execute()
+        resetConnectionFailureNotice()
+        return response
+      } catch (retryError) {
+        const raw = unwrapFetchError(retryError)
+        if (!(retryError instanceof FetchAttemptError)) failHandled(raw)
+        const { timedOut } = retryError
+        if (!isRetryableFailure(raw, timedOut, init)) failHandled(raw)
+        if (timedOut) {
+          notifyConnectionFailureOnce(REQUEST_TIMEOUT_MESSAGE)
+          failHandled(raw)
+        }
+
+        await sleep(CHANNEL_RETRY_DELAY_MS)
+        if (init.signal?.aborted) failHandled(raw)
+        if (!(await probeBackend(originalFetch))) {
+          giveUpBackend()
+          failHandled(raw)
+        }
+
+        try {
+          const response = await execute()
+          resetConnectionFailureNotice()
+          return response
+        } catch (finalError) {
+          const finalRaw = unwrapFetchError(finalError)
+          if (finalError instanceof FetchAttemptError) {
+            const finalTimedOut = finalError.timedOut
+            if (isRetryableFailure(finalRaw, finalTimedOut, init)) {
+              notifyConnectionFailureOnce(finalTimedOut ? REQUEST_TIMEOUT_MESSAGE : CHANNEL_INTERRUPTED_MESSAGE)
+            }
+          }
+          failHandled(finalRaw)
+        }
       }
     }
 
@@ -196,27 +265,12 @@ export function installGlobalFetchGuard() {
       if (!(error instanceof FetchAttemptError)) throw error
 
       const recovered = await runSharedRecovery(originalFetch)
-      if (!recovered) {
-        markFetchGuardHandled(unwrapFetchError(error))
-        throw unwrapFetchError(error)
+      if (!recovered) failHandled(unwrapFetchError(error))
+      if (error.timedOut) {
+        notifyConnectionFailureOnce(REQUEST_TIMEOUT_MESSAGE)
+        failHandled(unwrapFetchError(error))
       }
-
-      try {
-        const response = await execute()
-        resetConnectionFailureNotice()
-        return response
-      } catch (retryError) {
-        const raw = unwrapFetchError(retryError)
-        if (retryError instanceof FetchAttemptError) {
-          const { timedOut } = retryError
-          if (isRetryableFailure(raw, timedOut, init)) {
-            connectionGaveUp = true
-            notifyConnectionFailureOnce('服务器连接失败，已重试 3 次仍未连通，请确认后台是否运行')
-          }
-        }
-        markFetchGuardHandled(raw)
-        throw raw
-      }
+      return retryAfterBackendConfirmed()
     }
   }
 }

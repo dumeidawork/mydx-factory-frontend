@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Form, Input, Button, Card } from 'antd'
 import LanguageSwitcher from '../components/LanguageSwitcher'
@@ -10,6 +11,7 @@ type LoginForm = { username: string; password: string }
 
 export default function Login() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
 
   const onFinish = async (values: LoginForm) => {
     try {
@@ -38,7 +40,7 @@ export default function Login() {
         return
       }
       setAuthSession(data.access_token, data.user)
-      window.location.href = '/'
+      navigate('/', { replace: true })
     } catch {
       message.error('无法连接服务器，请确认后台已启动')
     }

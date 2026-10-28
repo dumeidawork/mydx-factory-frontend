@@ -140,7 +140,7 @@ The image serves static files via nginx. Configure `nginx.conf` and build-time `
 
 | Target | Notes |
 |--------|-------|
-| Electron desktop | Built from monorepo root: `npm run desktop:package`. Uses `HashRouter` when loaded via `file://` |
+| Electron desktop | Built from monorepo root: `npm run desktop:package` (Win10/11) or `npm run desktop:package:win7` (Win7 x64/ia32). Uses `HashRouter` when loaded via `file://` |
 | Capacitor (Android) | Dependencies are included; mobile packaging is configured at the monorepo level |
 
 ### Key Utilities
@@ -302,7 +302,7 @@ docker build -t mingyuan-erp-frontend .
 
 | ターゲット | 備考 |
 |------------|------|
-| Electron デスクトップ | monorepo ルート：`npm run desktop:package`。`file://` 読み込み時は `HashRouter` |
+| Electron デスクトップ | monorepo ルート：`npm run desktop:package`（Win10/11）または `npm run desktop:package:win7`（Win7 32/64 ビット）。`file://` 読み込み時は `HashRouter` |
 | Capacitor（Android） | 依存関係同梱；モバイル打包は monorepo 側で設定 |
 
 ### 主要ユーティリティ
@@ -464,7 +464,7 @@ docker build -t mingyuan-erp-frontend .
 
 | 目标 | 说明 |
 |------|------|
-| Electron 桌面 | 在 monorepo 根目录：`npm run desktop:package`；`file://` 协议下使用 `HashRouter` |
+| Electron 桌面 | 在 monorepo 根目录：`npm run desktop:package`（Win10/11）或 `npm run desktop:package:win7`（Win7 32/64 位）；`file://` 协议下使用 `HashRouter` |
 | Capacitor（Android） | 依赖已配置；移动端打包在 monorepo 层完成 |
 
 ### 主要工具模块

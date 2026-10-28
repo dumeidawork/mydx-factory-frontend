@@ -3,6 +3,8 @@
 const TOKEN_KEY = 'erp_token'
 const USER_KEY = 'erp_user'
 
+export type LayoutMode = 'horizontal' | 'vertical' | 'classic' | 'mix' | 'columns' | 'overview'
+
 export type AuthUser = {
   id: number
   name: string
@@ -12,6 +14,22 @@ export type AuthUser = {
   role_name_zh?: string
   department?: string | null
   language_preference?: string
+  layout_mode?: LayoutMode | string
+  color_theme?: string
+}
+
+const LAYOUT_MODES = new Set<LayoutMode>([
+  'horizontal',
+  'vertical',
+  'classic',
+  'mix',
+  'columns',
+  'overview',
+])
+
+export function normalizeLayoutMode(value: unknown): LayoutMode {
+  const mode = String(value || 'horizontal').trim()
+  return LAYOUT_MODES.has(mode as LayoutMode) ? (mode as LayoutMode) : 'horizontal'
 }
 
 export function getToken(): string | null {
@@ -32,14 +50,31 @@ export function getStoredUser(): AuthUser | null {
   }
 }
 
+export const AUTH_CHANGED_EVENT = 'erp-auth-changed'
+
+function notifyAuthChanged() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
+}
+
 export function setAuthSession(token: string, user: AuthUser) {
   localStorage.setItem(TOKEN_KEY, token)
   localStorage.setItem(USER_KEY, JSON.stringify(user))
+  notifyAuthChanged()
+}
+
+export function updateStoredUser(patch: Partial<AuthUser>) {
+  const current = getStoredUser()
+  if (!current) return null
+  const next = { ...current, ...patch }
+  localStorage.setItem(USER_KEY, JSON.stringify(next))
+  return next
 }
 
 export function clearAuthSession() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
+  notifyAuthChanged()
 }
 
 export function authHeaders(extra?: HeadersInit): HeadersInit {

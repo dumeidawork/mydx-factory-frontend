@@ -5,6 +5,7 @@ import { apiUrl, isFetchGuardHandled } from '../utils/api'
 import { askSavePath } from '../utils/savePath'
 import { message } from '../utils/feedback'
 import { getDownloadFileName, readFetchErrorMessage, saveGeneratedBlob } from '../utils/clientFileSave'
+import { usePageTitle } from '../layout/usePageTitle'
 
 const STEP2_TABLE_BODY_HEIGHT = 480
 const STEP3_DEFAULTS = {
@@ -32,6 +33,7 @@ type ItemRow = {
 }
 
 export default function PackingPage() {
+  const pageTitle = usePageTitle()
   const [rows, setRows] = useState<ItemRow[]>([])
   const [selectedKeys, setSelectedKeys] = useState<(string | number)[]>([])
   const [deletedIds, setDeletedIds] = useState<number[]>([])
@@ -324,7 +326,7 @@ export default function PackingPage() {
   }
 
   return (
-    <Card title="装箱工作台" className={styles.pageCard}>
+    <Card title={pageTitle} className={styles.pageCard}>
       <Form form={form} layout="vertical" initialValues={STEP3_DEFAULTS}>
         <Card size="small" title="Step1 检索待装箱物料" className={styles.sectionCard}>
           <div className={styles.toolbarRow}>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, notification } from 'antd'
+import { Button, Card, Collapse, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, notification } from 'antd'
 import dayjs, { Dayjs } from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import styles from '../pages/WorkflowPages.module.css'
@@ -39,8 +39,23 @@ type CertAllocation = {
   cert_date_yymmdd: string
   cert_daily_seq: number
   is_reused?: boolean
+  has_date_conflict?: boolean
   allocated_cert_date_yymmdd?: string
   allocated_certificate_no?: string
+}
+
+function singleShipDateText(row: Record<string, unknown>) {
+  const text = String(row.actual_delivery_date || '').trim()
+  if (!text || text.includes('、')) return ''
+  const parsed = dayjs(text)
+  return parsed.isValid() ? parsed.format('YYYY-M-D') : ''
+}
+
+function appendQcDateFilters(qs: URLSearchParams, values: Record<string, unknown>) {
+  const planned = values.planned_arrival_date as Dayjs | null | undefined
+  const delivery = values.delivery_date as Dayjs | null | undefined
+  if (planned) qs.set('planned_arrival_date', planned.format('YYYY-MM-DD'))
+  if (delivery) qs.set('delivery_date', delivery.format('YYYY-MM-DD'))
 }
 
 function yymmddFromDayjs(value: Dayjs) {
@@ -78,9 +93,9 @@ export default function DalianQcPanel({
   const navigate = useNavigate()
   const [listRows, setListRows] = useState<Record<string, unknown>[]>([])
   const [selectedListKeys, setSelectedListKeys] = useState<(string | number)[]>([])
-  const [batchDate, setBatchDate] = useState<dayjs.Dayjs | null>(dayjs())
   const [dateConfirmed, setDateConfirmed] = useState(false)
   const [confirmedDateText, setConfirmedDateText] = useState('')
+  const [confirmedDateByRow, setConfirmedDateByRow] = useState<Record<number, string>>({})
   const [pendingCertNo, setPendingCertNo] = useState<Record<number, string>>({})
   const [savedCertNo, setSavedCertNo] = useState<Record<number, string>>({})
   const [mode, setMode] = useState<'list' | 'detail'>('list')
@@ -118,34 +133,37 @@ export default function DalianQcPanel({
     setSavedCertNo,
   }
 
-  const loadListByFilters = async (orderNo = '', materialNo = '', status = '') => {
+  const loadListByFilters = async (orderNo = '', materialNo = '', status = '', values: Record<string, unknown> = {}) => {
     const qs = new URLSearchParams({ region: 'dalian' })
     if (orderNo) qs.set('order_no', orderNo)
     if (materialNo) qs.set('material_no', materialNo)
     if (status) qs.set('status', status)
+    appendQcDateFilters(qs, values)
     const res = await fetch(apiUrl(`/api/v1/workflow/qc/list?${qs.toString()}`))
     const data = await res.json()
     if (!res.ok) return message.error(data.detail || '加载失败')
     setListRows(data.rows || [])
     resetListCertState(listCertResetters)
+    setConfirmedDateByRow({})
     setListMode('pending')
     setSelectedListKeys([])
     return data.rows || []
   }
 
   const querySnapshots = async () => {
-    const values = await form.validateFields(['query_order_no', 'query_material_no', 'query_status'])
+    const values = form.getFieldsValue(['query_order_no', 'query_material_no', 'query_status', 'planned_arrival_date', 'delivery_date'])
     const orderNo = values.query_order_no || ''
     const materialNo = values.query_material_no || ''
     const status = values.query_status || ''
-    if (!orderNo && !materialNo && !status) {
-      message.warning('请至少填写订单号、物料号或状态')
+    if (!orderNo && !materialNo && !status && !values.planned_arrival_date && !values.delivery_date) {
+      message.warning('请至少填写订单号、物料号、状态或日期')
       return
     }
     const qs = new URLSearchParams({ region: 'dalian' })
     if (orderNo) qs.set('order_no', orderNo)
     if (materialNo) qs.set('material_no', materialNo)
     if (status) qs.set('status', status)
+    appendQcDateFilters(qs, values)
     const res = await fetch(apiUrl(`/api/v1/workflow/qc/snapshots?${qs.toString()}`))
     const data = await res.json()
     if (!res.ok) return message.error(data.detail || '查询失败')
@@ -156,12 +174,12 @@ export default function DalianQcPanel({
   }
 
   const loadList = async () => {
-    const values = await form.validateFields(['query_order_no', 'query_material_no', 'query_status'])
-    await loadListByFilters(values.query_order_no || '', values.query_material_no || '', values.query_status || '')
+    const values = form.getFieldsValue(['query_order_no', 'query_material_no', 'query_status', 'planned_arrival_date', 'delivery_date'])
+    await loadListByFilters(values.query_order_no || '', values.query_material_no || '', values.query_status || '', values)
   }
 
-  const applyDetailData = (data: Record<string, any>, order_no: string, material_no: string, confirmed: boolean) => {
-    const dateValue = dayjs(data.base_info?.date || dayjs().format('YYYY-MM-DD'))
+  const applyDetailData = (data: Record<string, any>, order_no: string, material_no: string, confirmed: boolean, shipDateText = '') => {
+    const dateValue = shipDateText ? dayjs(shipDateText) : dayjs(data.base_info?.date || dayjs().format('YYYY-MM-DD'))
     const allocation = (data.cert_allocation || {}) as CertAllocation
     setSelectedItemNo(
       data.order_row?.item_no != null && data.order_row?.item_no !== '' ? Number(data.order_row.item_no) : null
@@ -221,34 +239,62 @@ export default function DalianQcPanel({
       message.warning('请先勾选要确认出厂日期的物料')
       return
     }
-    const dateText = (batchDate || dayjs()).format('YYYY-M-D')
-    const res = await fetch(apiUrl('/api/v1/workflow/qc/dalian/confirm_date'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        date: dateText,
-        rows: selectedRows.map((row) => ({
-          order_detail_id: Number(row.id),
-          order_no: String(row.order_no || ''),
-          material_no: String(row.material_no || ''),
-          item_no: row.item_no != null && row.item_no !== '' ? Number(row.item_no) : null,
-        })),
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) return message.error(data.detail || '确认出厂日期失败')
-    const nextSaved: Record<number, string> = {}
-    const nextPending: Record<number, string> = {}
-    for (const item of data.rows || []) {
-      const rowId = Number(item.order_detail_id)
-      nextSaved[rowId] = String(item.certificate_no || '')
-      nextPending[rowId] = String(item.certificate_no || '')
+    const groups = new Map<string, Record<string, unknown>[]>()
+    const skipped: string[] = []
+    for (const row of selectedRows) {
+      const dateText = singleShipDateText(row)
+      if (!dateText) {
+        skipped.push(String(row.material_no || row.id || ''))
+        continue
+      }
+      const bucket = groups.get(dateText) || []
+      bucket.push(row)
+      groups.set(dateText, bucket)
+    }
+    if (!groups.size) {
+      message.warning('所选行没有唯一的实际发货日期，未分配证书编号')
+      return
+    }
+    const nextSaved: Record<number, string> = { ...savedCertNo }
+    const nextPending: Record<number, string> = { ...pendingCertNo }
+    const nextDates: Record<number, string> = { ...confirmedDateByRow }
+    const conflicts: string[] = []
+    let allocated = 0
+    for (const [dateText, rows] of groups) {
+      const res = await fetch(apiUrl('/api/v1/workflow/qc/dalian/confirm_date'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: dateText,
+          rows: rows.map((row) => ({
+            order_detail_id: Number(row.id),
+            order_no: String(row.order_no || ''),
+            material_no: String(row.material_no || ''),
+            item_no: row.item_no != null && row.item_no !== '' ? Number(row.item_no) : null,
+          })),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) return message.error(data.detail || '确认出厂日期失败')
+      for (const item of data.rows || []) {
+        const rowId = Number(item.order_detail_id)
+        nextSaved[rowId] = String(item.certificate_no || '')
+        nextPending[rowId] = String(item.certificate_no || '')
+        nextDates[rowId] = dateText
+        allocated += 1
+        if (item.cert_allocation?.has_date_conflict) {
+          conflicts.push(`${item.material_no || rowId} 已有证书日期与实际发货日期不一致`)
+        }
+      }
     }
     setSavedCertNo(nextSaved)
     setPendingCertNo(nextPending)
+    setConfirmedDateByRow(nextDates)
     setDateConfirmed(true)
-    setConfirmedDateText(dateText)
-    message.success(`已确认出厂日期 ${dateText}，并分配 ${(data.rows || []).length} 个证书编号`)
+    setConfirmedDateText('')
+    if (conflicts.length) message.warning(conflicts.join('；'))
+    if (skipped.length) message.warning(`以下物料没有唯一实际发货日期，未占号：${skipped.join('、')}`)
+    message.success(`已按各行实际发货日期分配 ${allocated} 个证书编号`)
   }
 
   const confirmDetailFactoryDate = async (forceRegenerate = false) => {
@@ -273,6 +319,9 @@ export default function DalianQcPanel({
     setCertAllocation(allocation)
     setDetailDateConfirmed(true)
     form.setFieldValue('certificate_no', allocation.certificate_no)
+    if (allocation.has_date_conflict) {
+      message.warning('已有证书编号的日期与本次出厂日期不一致，未自动重编')
+    }
     return allocation
   }
 
@@ -293,7 +342,8 @@ export default function DalianQcPanel({
     order_no: string,
     material_no: string,
     heat_no: string,
-    heat_treatment_batch_no: string
+    heat_treatment_batch_no: string,
+    shipDateText = ''
   ) => {
     await fetch(apiUrl('/api/v1/workflow/qc/start'), {
       method: 'POST',
@@ -313,7 +363,7 @@ export default function DalianQcPanel({
       setSelectedMaterialNo(material_no)
       setSelectedHeatNo(heat_no || '')
       setSelectedHeatTreatmentBatchNo(heat_treatment_batch_no || '')
-      applyDetailData(data, order_no, material_no, false)
+      applyDetailData(data, order_no, material_no, false, shipDateText)
       setMode('detail')
       if (data.trial_data_notice?.level === 'missing') {
         Modal.info({
@@ -529,16 +579,27 @@ export default function DalianQcPanel({
     setSaveDir(nextSaveDir)
     setExporting(true)
     setExportProgress(outputFormat === 'pdf' ? '步骤 ①/③：正在生成 Word 版质保书...' : null)
-    const dateText = confirmedDateText || (batchDate || dayjs()).format('YYYY-M-D')
     try {
       const { createdFiles, failed } = await runBatchCertificateExport(selectedRows, {
         outputFormat,
         useUtmtpt,
         saveDirectory: nextSaveDir,
-        dateText,
+        dateText: '',
+        dateTextForRow: (row) => confirmedDateByRow[Number(row.id)] || singleShipDateText(row),
         generateUrl: apiUrl('/api/v1/workflow/qc/dalian/generate_certificate'),
         fetchDetail: (orderNo, materialNo, heatNo, batchNo, orderDetailId) =>
-          fetch(workflowQcDalianDetailUrl(orderNo, materialNo, heatNo, batchNo, orderDetailId, dateText, false, false)),
+          fetch(
+            workflowQcDalianDetailUrl(
+              orderNo,
+              materialNo,
+              heatNo,
+              batchNo,
+              orderDetailId,
+              confirmedDateByRow[orderDetailId] || '',
+              false,
+              false,
+            ),
+          ),
         getCertificateNo: (row) => savedCertNo[Number(row.id)] || pendingCertNo[Number(row.id)] || '',
         buildSaveBody: ({ detail, dateText: batchDateText, orderDetailId, orderNo, materialNo, heatNo, batchNo, certificateNo }) => {
           const baseInfo = (detail.base_info as Record<string, unknown> | undefined) || {}
@@ -655,9 +716,50 @@ export default function DalianQcPanel({
     await batchLiveGenerate(selectedRows)
   }
 
+  const guide = (
+    <Collapse
+      className={styles.opGuide}
+      defaultActiveKey={[]}
+      items={[
+        {
+          key: 'guide',
+          label: '操作说明',
+          children: (
+            <div className={styles.opGuideBody}>
+              <div className={styles.opGuideBlock}>
+                <div className={styles.opGuideLabel}>操作步骤</div>
+                <ol className={styles.opGuideList}>
+                  <li>页顶选择 Word 或 PDF。A105 需要带超声、磁粉、渗透的模板时，打开【UTMTPT 版本】。</li>
+                  <li>可按订单号、物料号、状态、预定到货日期、发货日期筛选。只填一个日期就按该日；两个都填，两天的明细都会出现。然后点【加载待质检列表】。</li>
+                  <li>看每行的【实际发货日期】。勾选后点【确认出厂日期】，系统按这一行自己的实际发货日期分配证书编号。没有唯一实际发货日期的行不会占号。</li>
+                  <li>点【进入质检中】后，出厂日期会带出该行的实际发货日期，仍要点【确认出厂日期】才会分配编号。核对客户、合同号和工厂编号后，点【保存质检记录】，再点【生成质保书并导出】。</li>
+                  <li>批量生成前必须先【确认出厂日期】。列表里改过证书编号时，先点该行【保存】。粉色行表示已经出过质保书，可按历史快照重生成，或按当前数据生成新的。</li>
+                  <li>点【查询】查看已生成的质保书。订单号、物料号、状态、预定到货日期、发货日期至少填一项。</li>
+                </ol>
+              </div>
+              <div className={styles.opGuideBlock}>
+                <div className={styles.opGuideLabel}>注意事项</div>
+                <ul className={`${styles.opGuideList} ${styles.opGuideNotes}`}>
+                  <li>本页只做订单号以 4 开头的大连订单。法国订单请到【质检/法国质检】，法国质检不按预定到货日期或发货日期筛选。</li>
+                  <li>部分发货会拆成独立订单明细。证书上的数量就是这一行的数量，不是拆分前的合同总数。</li>
+                  <li>证书编号形如 ZYXMZ261008-1，中间六位是实际发货日期。同一条明细再次确认会沿用已有编号。已有编号的日期和这次发货日期不一致时，只提示，不自动重编。</li>
+                  <li>没有实际发货日期，或同一行有多个实际发货日期时，不自动占号。没有预定的手工发货明细，不会出现在按日期加载的列表里。</li>
+                  <li>机械性能是最薄、最厚两组，化学成分同样只读，都从热处理带出。缺数据时先补热处理，再出证。</li>
+                  <li>【复制】会新增一条订单明细。【删除】会删除这条订单明细；若该订单号、物料号、条目已无剩余行，对应装箱记录一并清除。</li>
+                  <li>按历史快照重生成不读取最新炉号和试验数据。按当前数据生成会更新已保存的质保书。</li>
+                </ul>
+              </div>
+            </div>
+          ),
+        },
+      ]}
+    />
+  )
+
   if (mode === 'list') {
     return (
       <>
+        {guide}
         <Form form={form} layout="vertical">
           <Space wrap align="start" className={styles.qcListFilterRow}>
             <Form.Item name="query_order_no" label="订单号">
@@ -673,6 +775,12 @@ export default function DalianQcPanel({
                 style={{ minWidth: 160 }}
                 options={ORDER_STATUS_OPTIONS.map((v) => ({ value: v, label: v }))}
               />
+            </Form.Item>
+            <Form.Item name="planned_arrival_date" label="预定到货日期">
+              <DatePicker allowClear />
+            </Form.Item>
+            <Form.Item name="delivery_date" label="发货日期">
+              <DatePicker allowClear />
             </Form.Item>
             <Form.Item label=" " colon={false}>
               <Space wrap>
@@ -696,16 +804,8 @@ export default function DalianQcPanel({
             </Button>
             {listMode === 'pending' ? (
               <>
-                <DatePicker
-                  value={batchDate}
-                  format="YYYY-M-D"
-                  onChange={(v) => {
-                    setBatchDate(v)
-                    resetListCertState(listCertResetters)
-                  }}
-                />
                 <Button type="primary" onClick={confirmBatchFactoryDate}>确认出厂日期</Button>
-                {dateConfirmed ? <Tag color="green">已确认 {confirmedDateText}</Tag> : <Tag>出厂日期未确认</Tag>}
+                {dateConfirmed ? <Tag color="green">已按各行实际发货日期确认</Tag> : <Tag>出厂日期未确认</Tag>}
               </>
             ) : (
               <Tag color="orange">已生成质保书查询结果</Tag>
@@ -735,10 +835,23 @@ export default function DalianQcPanel({
             savedCertNo: listMode === 'pending' ? savedCertNo : undefined,
             setSavedCertNo: listMode === 'pending' ? setSavedCertNo : undefined,
             confirmedDateText: listMode === 'pending' ? confirmedDateText : undefined,
+            confirmedDateForRow: listMode === 'pending' ? (row) => confirmedDateByRow[Number(row.id)] || '' : undefined,
             onEnter: (row) =>
-              enter(Number(row.id), String(row.order_no), String(row.material_no), String(row.heat_no || ''), String(row.heat_treatment_batch_no || '')),
+              enter(
+                Number(row.id),
+                String(row.order_no),
+                String(row.material_no),
+                String(row.heat_no || ''),
+                String(row.heat_treatment_batch_no || ''),
+                singleShipDateText(row),
+              ),
             extraColumns: [
+              ...(listMode === 'pending'
+                ? [{ title: 'ID', dataIndex: 'id', width: 80 } as const]
+                : []),
               { title: '订单号', dataIndex: 'order_no' },
+              { title: '预定到货日期', dataIndex: 'planned_arrival_date', render: (v?: string) => v || '-' },
+              { title: '实际发货日期', dataIndex: 'actual_delivery_date', render: (v?: string) => v || '-' },
               { title: '料号', dataIndex: 'name', render: (v?: string, row?: Record<string, unknown>) => {
                 if (listMode === 'generated' && row) {
                   const delivery = (row.delivery_content as Array<Record<string, unknown>> | undefined)?.[0]
@@ -790,6 +903,7 @@ export default function DalianQcPanel({
       extra={<QcBackToListButton onClick={() => setMode('list')} />}
       className={styles.pageCard}
     >
+      {guide}
       <Form form={form} layout="vertical">
         <Card size="small" title="模块一：基础与合同信息" className={styles.sectionCard}>
           <Space wrap>

@@ -6,6 +6,7 @@ import { Navigate } from 'react-router-dom'
 import { apiUrl } from '../utils/api'
 import { authFetch, getStoredUser } from '../utils/auth'
 import { message } from '../utils/feedback'
+import { usePageTitle } from '../layout/usePageTitle'
 import './UsersPage.css'
 
 type RoleItem = {
@@ -49,6 +50,7 @@ async function readJson<T = unknown>(res: Response): Promise<T> {
 }
 
 export default function UsersPage() {
+  const pageTitle = usePageTitle()
   const currentUser = getStoredUser()
   const isAdmin = Boolean(currentUser?.role_code && ADMIN_ROLE_CODES.has(currentUser.role_code))
 
@@ -220,7 +222,7 @@ export default function UsersPage() {
           <TeamOutlined />
         </span>
         <div>
-          <h1 className="users-page-title">用户管理</h1>
+          <h1 className="users-page-title">{pageTitle}</h1>
           <div className="users-page-subtitle">管理员可追加账号、调整角色与重置密码（无公开自助注册）</div>
         </div>
       </div>

@@ -14,23 +14,23 @@
   margin: 0 !important;
   padding: 6px 16px !important;
   background: #fff !important;
-  border: 1px solid #1677ff !important;
+  border: 1px solid var(--erp-color-primary) !important;
   border-bottom: none !important;
   border-radius: 6px 6px 0 0 !important;
   transition: background 0.2s, color 0.2s, box-shadow 0.2s;
 }
 
 .contract-tabs .ant-tabs-tab:hover {
-  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.15);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--erp-color-primary) 18%, transparent);
 }
 
 .contract-tabs .ant-tabs-tab .ant-tabs-tab-btn {
-  color: #1677ff !important;
+  color: var(--erp-color-primary) !important;
 }
 
 .contract-tabs .ant-tabs-tab-active {
-  background: #1677ff !important;
-  border-color: #1677ff !important;
+  background: var(--erp-color-primary) !important;
+  border-color: var(--erp-color-primary) !important;
 }
 
 .contract-tabs .ant-tabs-tab-active .ant-tabs-tab-btn,
@@ -53,7 +53,7 @@
 }
 
 .contract-tabs .contract-tab-label--drag-over {
-  outline: 2px dashed #1677ff;
+  outline: 2px dashed var(--erp-color-primary);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -111,6 +111,23 @@
 
 .contract-archive-table .ant-table-thead > tr > th {
   background: #f0f6ff;
+}
+
+.contract-archive-table .ant-table-cell-fix-left {
+  background: #fff;
+}
+
+.contract-archive-table .ant-table-thead > tr > th.ant-table-cell-fix-left {
+  background: #f0f6ff;
+}
+
+.contract-archive-table .contract-full-name-link.ant-btn-link {
+  height: auto;
+  padding-inline: 0;
+  white-space: normal;
+  word-break: break-all;
+  text-align: left;
+  line-height: 1.4;
 }
 
 /* 图纸或物料建档缺失：待补资料 */

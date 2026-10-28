@@ -3,7 +3,9 @@ import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Space, Tab
 import { useSearchParams } from 'react-router-dom'
 import styles from './WorkflowPages.module.css'
 import { apiUrl, fetchPostJson } from '../utils/api'
+import { authFetch, getStoredUser } from '../utils/auth'
 import { message } from '../utils/feedback'
+import { usePageTitle } from '../layout/usePageTitle'
 
 type TrialRow = {
   id?: number
@@ -134,6 +136,99 @@ function toNumber(value: string | number) {
   return Number.isNaN(parsed) ? null : parsed
 }
 
+const IMPACT_TEST_MIN = 27
+const IMPACT_TEST_MAX = 300
+
+/** 从冲击标准字符串提取全部数值，支持 T:198,150,141/R:... 与 T:218.182.156/R:... */
+function extractImpactTestValues(value: string): number[] {
+  const matches = String(value || '').match(/\d+/g)
+  return matches ? matches.map((item) => Number(item)) : []
+}
+
+function validateImpactTest(value: string): string | null {
+  const numbers = extractImpactTestValues(value)
+  if (!numbers.length) return '-20℃下冲击标准未识别到有效数值'
+  const outOfRange = numbers.filter((n) => n < IMPACT_TEST_MIN || n > IMPACT_TEST_MAX)
+  if (outOfRange.length) {
+    return `-20℃下冲击标准单个值须在${IMPACT_TEST_MIN}～${IMPACT_TEST_MAX}之间，超出范围：${outOfRange.join('、')}`
+  }
+  return null
+}
+
+function splitHardness(value: string): [string, string, string] {
+  const parts = String(value || '')
+    .split('/')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  while (parts.length < 3) parts.push('')
+  return [parts[0], parts[1], parts[2]]
+}
+
+function hardnessPartSignature(part: string): number | string {
+  const text = String(part || '').trim()
+  if (!text) return ''
+  const parsed = Number(text)
+  return Number.isNaN(parsed) ? text : parsed
+}
+
+function hardnessSignature(value: string): string {
+  return JSON.stringify(splitHardness(value).map(hardnessPartSignature))
+}
+
+function impactSignature(value: string): string {
+  return JSON.stringify(extractImpactTestValues(value))
+}
+
+function formatHardnessDisplay(value: string): string {
+  return splitHardness(value).filter(Boolean).join('/')
+}
+
+function collectPeerDuplicateErrors(rows: TrialRow[]): Array<{ rowKey: string; message: string }> {
+  const hardnessIndexes = new Map<string, number[]>()
+  const impactIndexes = new Map<string, number[]>()
+  rows.forEach((row, index) => {
+    if (String(row.hardness || '').trim()) {
+      const key = hardnessSignature(row.hardness)
+      const list = hardnessIndexes.get(key) || []
+      list.push(index)
+      hardnessIndexes.set(key, list)
+    }
+    if (String(row.impact_test || '').trim()) {
+      const key = impactSignature(row.impact_test)
+      const list = impactIndexes.get(key) || []
+      list.push(index)
+      impactIndexes.set(key, list)
+    }
+  })
+
+  const errors: Array<{ rowKey: string; message: string }> = []
+  const seen = new Set<string>()
+  const pushError = (index: number, message: string) => {
+    const rowKey = rows[index]?.rowKey
+    if (!rowKey) return
+    const dedupeKey = `${rowKey}::${message}`
+    if (seen.has(dedupeKey)) return
+    seen.add(dedupeKey)
+    errors.push({ rowKey, message })
+  }
+
+  rows.forEach((row, index) => {
+    if (String(row.hardness || '').trim()) {
+      const peers = hardnessIndexes.get(hardnessSignature(row.hardness)) || []
+      if (peers.length > 1) {
+        pushError(index, `第${index + 1}行：硬度1/硬度2/硬度3 与已有记录重复（${formatHardnessDisplay(row.hardness)}）`)
+      }
+    }
+    if (String(row.impact_test || '').trim()) {
+      const peers = impactIndexes.get(impactSignature(row.impact_test)) || []
+      if (peers.length > 1) {
+        pushError(index, `第${index + 1}行：-20℃下冲击标准 与已有记录重复`)
+      }
+    }
+  })
+  return errors
+}
+
 function rowHasIdentifiers(row: TrialRow) {
   return Boolean(String(row.heat_no || '').trim() && String(row.batch_no || '').trim())
 }
@@ -157,33 +252,40 @@ function calcCeq(values: ChemicalMap) {
 }
 
 export default function HeatTreatmentPage() {
+  const pageTitle = usePageTitle()
   const [searchParams] = useSearchParams()
   const [form] = Form.useForm()
+  const currentUser = getStoredUser()
+  const currentUserName = currentUser?.name || currentUser?.username || ''
   const [activeTab, setActiveTab] = useState('chemical')
   const [trialRows, setTrialRows] = useState<TrialRow[]>([])
-  const [trialUpdater, setTrialUpdater] = useState('')
   const [trialPasteText, setTrialPasteText] = useState('')
   const [trialExists, setTrialExists] = useState(false)
   const [trialRefreshReady, setTrialRefreshReady] = useState(false)
   const [trialRowErrors, setTrialRowErrors] = useState<Set<string>>(new Set())
   const [chemicalRaw, setChemicalRaw] = useState<ChemicalMap>(emptyChemicalMap())
   const [chemicalSelf, setChemicalSelf] = useState<ChemicalMap>(emptyChemicalMap())
-  const [chemicalUpdater, setChemicalUpdater] = useState('')
   const [chemicalPasteText, setChemicalPasteText] = useState('')
   const [chemicalExists, setChemicalExists] = useState(false)
   const [resultState, setResultState] = useState<ResultState>({})
 
+  const ensureLoggedInUser = () => {
+    if (!currentUserName) {
+      message.warning('未获取到登录用户，请重新登录后再操作')
+      return false
+    }
+    return true
+  }
+
   const resetAll = () => {
     form.resetFields()
     setTrialRows([])
-    setTrialUpdater('')
     setTrialPasteText('')
     setTrialExists(false)
     setTrialRefreshReady(false)
     setTrialRowErrors(new Set())
     setChemicalRaw(emptyChemicalMap())
     setChemicalSelf(emptyChemicalMap())
-    setChemicalUpdater('')
     setChemicalPasteText('')
     setChemicalExists(false)
     setResultState({})
@@ -222,7 +324,6 @@ export default function HeatTreatmentPage() {
     if (!res.ok) return message.error(data.detail || '化学成分查询失败')
     setChemicalRaw({ ...emptyChemicalMap(), ...(data.record?.raw || {}) })
     setChemicalSelf({ ...emptyChemicalMap(), ...(data.record?.self || {}) })
-    setChemicalUpdater(data.record?.updated_by || '')
     setChemicalExists(Boolean(data.exists))
     setActiveTab('chemical')
     message.success(data.exists ? '已加载化学成分' : '未查询到化学成分，可直接新建')
@@ -268,8 +369,40 @@ export default function HeatTreatmentPage() {
 
   const saveTrial = async () => {
     const values = await form.validateFields(['heat_no', 'batch_no'])
-    if (!trialUpdater.trim()) {
-      message.warning('请填写试验记录更新者')
+    if (!ensureLoggedInUser()) return
+
+    const impactErrors: Array<{ rowKey: string; message: string }> = []
+    trialRows.forEach((row, index) => {
+      if (!String(row.impact_test || '').trim()) return
+      const impactError = validateImpactTest(row.impact_test)
+      if (impactError) {
+        impactErrors.push({ rowKey: row.rowKey, message: `第${index + 1}行：${impactError}` })
+      }
+    })
+    if (impactErrors.length) {
+      setTrialRowErrors(new Set(impactErrors.map((item) => item.rowKey)))
+      Modal.error({
+        title: '提交失败',
+        content: (
+          <div style={{ whiteSpace: 'pre-wrap' }}>
+            {impactErrors.map((item) => item.message).join('\n')}
+          </div>
+        ),
+      })
+      return
+    }
+
+    const peerDuplicateErrors = collectPeerDuplicateErrors(trialRows)
+    if (peerDuplicateErrors.length) {
+      setTrialRowErrors(new Set(peerDuplicateErrors.map((item) => item.rowKey)))
+      Modal.error({
+        title: '提交失败',
+        content: (
+          <div style={{ whiteSpace: 'pre-wrap' }}>
+            {peerDuplicateErrors.map((item) => item.message).join('\n')}
+          </div>
+        ),
+      })
       return
     }
 
@@ -283,14 +416,13 @@ export default function HeatTreatmentPage() {
     }
 
     const doSave = async (confirmUpdateIndices: number[] = []) => {
-      const res = await fetch(apiUrl('/api/v1/heat-treatment/trial/save'), {
+      const res = await authFetch(apiUrl('/api/v1/heat-treatment/trial/save'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           order_no: form.getFieldValue('order_no') || '',
           heat_no: values.heat_no || '',
           batch_no: values.batch_no || '',
-          updated_by: trialUpdater.trim(),
           confirm_update_indices: confirmUpdateIndices,
           rows: trialRows.map((row) => ({
             id: row.id,
@@ -316,14 +448,21 @@ export default function HeatTreatmentPage() {
 
       if (!res.ok) {
         const detail = data.detail
-        if (detail && typeof detail === 'object' && detail.code === 'id_mismatch') {
+        if (detail && typeof detail === 'object' && (detail.code === 'id_mismatch' || detail.code === 'duplicate_trial_values')) {
           const errorKeys = new Set(
             (detail.row_indexes || [])
               .map((index) => trialRows[index]?.rowKey)
               .filter((rowKey): rowKey is string => Boolean(rowKey))
           )
           setTrialRowErrors(errorKeys)
-          Modal.error({ title: '提交失败', content: detail.message || 'id重复，请删除该行信息确认后重新提交' })
+          Modal.error({
+            title: '提交失败',
+            content: (
+              <div style={{ whiteSpace: 'pre-wrap' }}>
+                {detail.message || (detail.code === 'duplicate_trial_values' ? '硬度或冲击标准与已有记录重复' : 'id重复，请删除该行信息确认后重新提交')}
+              </div>
+            ),
+          })
           return
         }
         const messageText = typeof detail === 'string' ? detail : detail?.message || '试验记录保存失败'
@@ -367,19 +506,15 @@ export default function HeatTreatmentPage() {
 
   const saveChemical = async () => {
     const values = await form.validateFields(['heat_no'])
-    if (!chemicalUpdater.trim()) {
-      message.warning('请填写化学成分更新者')
-      return
-    }
+    if (!ensureLoggedInUser()) return
     const doSave = async () => {
-      const res = await fetch(apiUrl('/api/v1/heat-treatment/chemical/save'), {
+      const res = await authFetch(apiUrl('/api/v1/heat-treatment/chemical/save'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           order_no: form.getFieldValue('order_no') || '',
           heat_no: values.heat_no || '',
           batch_no: form.getFieldValue('batch_no') || '',
-          updated_by: chemicalUpdater.trim(),
           raw: { ...chemicalRaw, CEQ: calcCeq(chemicalRaw) },
           self: { ...chemicalSelf, CEQ: calcCeq(chemicalSelf) },
         }),
@@ -424,10 +559,7 @@ export default function HeatTreatmentPage() {
 
   const confirmRefreshTrialRow = useCallback(
     (row: TrialRow) => {
-      if (!trialUpdater.trim()) {
-        message.warning('请填写试验记录更新者')
-        return
-      }
+      if (!ensureLoggedInUser()) return
       Modal.confirm({
         title: '确认刷新测试结果',
         width: 520,
@@ -440,14 +572,18 @@ export default function HeatTreatmentPage() {
           </div>
         ),
         onOk: async () => {
-          const { ok, data } = await fetchPostJson<{ detail?: string; chemical_missing?: boolean }>('/api/v1/heat-treatment/result/sync-row', {
-            order_no: form.getFieldValue('order_no') || '',
-            heat_no: row.heat_no,
-            batch_no: row.batch_no,
-            material_no: row.material_no || '',
-            updated_by: trialUpdater.trim(),
+          const res = await authFetch(apiUrl('/api/v1/heat-treatment/result/sync-row'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              order_no: form.getFieldValue('order_no') || '',
+              heat_no: row.heat_no,
+              batch_no: row.batch_no,
+              material_no: row.material_no || '',
+            }),
           })
-          if (!ok) return message.error(data.detail || '刷新失败')
+          const data = (await res.json()) as { detail?: string; chemical_missing?: boolean }
+          if (!res.ok) return message.error(data.detail || '刷新失败')
           if (data.chemical_missing) {
             Modal.warning({
               title: '请确认',
@@ -460,7 +596,7 @@ export default function HeatTreatmentPage() {
         },
       })
     },
-    [trialUpdater, form, loadResultForMaterial]
+    [currentUserName, form, loadResultForMaterial]
   )
 
   const deleteTrialRow = useCallback(async (row: TrialRow) => {
@@ -491,17 +627,22 @@ export default function HeatTreatmentPage() {
 
   const submitResult = async () => {
     const values = await form.validateFields(['heat_no', 'batch_no'])
-    const { ok, data } = await fetchPostJson<{
+    if (!ensureLoggedInUser()) return
+    const res = await authFetch(apiUrl('/api/v1/heat-treatment/result/submit'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_no: form.getFieldValue('order_no') || '',
+        heat_no: values.heat_no || '',
+        batch_no: values.batch_no || '',
+        material_no: String(resultState.trial_row?.material_no || ''),
+      }),
+    })
+    const data = (await res.json()) as {
       detail?: string
       record?: { test_result?: string; remark?: string }
-    }>('/api/v1/heat-treatment/result/submit', {
-      order_no: form.getFieldValue('order_no') || '',
-      heat_no: values.heat_no || '',
-      batch_no: values.batch_no || '',
-      material_no: String(resultState.trial_row?.material_no || ''),
-      updated_by: trialUpdater.trim() || chemicalUpdater.trim() || '',
-    })
-    if (!ok) return message.error(data.detail || '测试结果提交失败')
+    }
+    if (!res.ok) return message.error(data.detail || '测试结果提交失败')
     setResultState((prev) => ({
       ...prev,
       test_result: data.record?.test_result || prev.test_result,
@@ -610,7 +751,7 @@ export default function HeatTreatmentPage() {
         render: (value: string, row: TrialRow) => <Input value={value} onChange={(e) => setTrialRows((prev) => prev.map((item) => (item.rowKey === row.rowKey ? { ...item, reduction_area: e.target.value } : item)))} />,
       },
       {
-        title: '硬度1/硬度2/硬度3（137-197）',
+        title: '硬度1/硬度2/硬度3（137-187）',
         dataIndex: 'hardness',
         width: 180,
         render: (value: string, row: TrialRow) => (
@@ -618,10 +759,27 @@ export default function HeatTreatmentPage() {
         ),
       },
       {
-        title: '-20℃下冲击标准（27J min）',
+        title: '-20℃下冲击标准（27-300）',
         dataIndex: 'impact_test',
-        width: 140,
-        render: (value: string, row: TrialRow) => <Input value={value} onChange={(e) => setTrialRows((prev) => prev.map((item) => (item.rowKey === row.rowKey ? { ...item, impact_test: e.target.value } : item)))} />,
+        width: 160,
+        render: (value: string, row: TrialRow) => (
+          <Input
+            value={value}
+            status={trialRowErrors.has(row.rowKey) ? 'error' : undefined}
+            placeholder="如：T:198,150,141/R:198,146,148"
+            onChange={(e) => {
+              const nextValue = e.target.value
+              setTrialRows((prev) => prev.map((item) => (item.rowKey === row.rowKey ? { ...item, impact_test: nextValue } : item)))
+              if (trialRowErrors.has(row.rowKey)) {
+                setTrialRowErrors((prev) => {
+                  const next = new Set(prev)
+                  next.delete(row.rowKey)
+                  return next
+                })
+              }
+            }}
+          />
+        ),
       },
       {
         title: '序号',
@@ -679,7 +837,7 @@ export default function HeatTreatmentPage() {
         ),
       },
     ],
-    [trialRefreshReady, confirmRefreshTrialRow, loadResultForMaterial, deleteTrialRow]
+    [trialRefreshReady, trialRowErrors, confirmRefreshTrialRow, loadResultForMaterial, deleteTrialRow]
   )
 
   const chemicalTableColumns = useMemo(
@@ -726,16 +884,16 @@ export default function HeatTreatmentPage() {
       { key: 'reduction_area', label: 'Z标准（>=30）', value: String((resultState.trial_row?.reduction_area as string) || '') || '/' },
       {
         key: 'hardness',
-        label: '硬度1/硬度2/硬度3（137-197）',
+        label: '硬度1/硬度2/硬度3（137-187）',
         value: String((resultState.trial_row?.hardness as string) || '') || '/',
       },
-      { key: 'impact_test', label: '-20℃下冲击标准（27J min）', value: String((resultState.trial_row?.impact_test as string) || '') || '/' },
+      { key: 'impact_test', label: '-20℃下冲击标准（27-300）', value: String((resultState.trial_row?.impact_test as string) || '') || '/' },
     ],
     [resultState]
   )
 
   return (
-    <Card title="热处理与测试" className={styles.pageCard}>
+    <Card title={pageTitle} className={styles.pageCard}>
       <Form form={form} layout="vertical">
         <Card size="small" title="检索条件" className={styles.sectionCard}>
           <Space wrap align="end">
@@ -768,7 +926,7 @@ export default function HeatTreatmentPage() {
             children: (
               <Card size="small" className={styles.sectionCard}>
                 <Space wrap align="end" style={{ marginBottom: 12 }}>
-                  <Input style={{ width: 220 }} value={chemicalUpdater} placeholder="更新者（必填）" onChange={(e) => setChemicalUpdater(e.target.value)} />
+                  <Input style={{ width: 220 }} disabled value={currentUserName || '当前用户'} addonBefore="更新者" />
                   <Button type="primary" onClick={saveChemical}>
                     提交
                   </Button>
@@ -798,7 +956,7 @@ export default function HeatTreatmentPage() {
             children: (
               <Card size="small" className={styles.sectionCard}>
                 <Space wrap align="end" style={{ marginBottom: 12 }}>
-                  <Input style={{ width: 220 }} value={trialUpdater} placeholder="更新者（必填）" onChange={(e) => setTrialUpdater(e.target.value)} />
+                  <Input style={{ width: 220 }} disabled value={currentUserName || '当前用户'} addonBefore="更新者" />
                   <Button
                     type="primary"
                     onClick={() => {

@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Tag } from 'antd'
+import { useLocation } from 'react-router-dom'
+import { Button, Card, Checkbox, Collapse, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import styles from './WorkflowPages.module.css'
 import { apiUrl } from '../utils/api'
+import { authFetch } from '../utils/auth'
 import { message } from '../utils/feedback'
+import { confirmMaterialAlign, showAlignConfirmResult } from './PendingMaterialGapPanel'
+import { notifyWorkbenchUnreadChanged } from '../layout/WorkbenchUnreadContext'
+import { usePageTitle } from '../layout/usePageTitle'
+import { normalizeDrawingInput } from '../utils/specParser'
 import DrawingArchivePanel from './DrawingArchivePanel'
+import DrawingFlangeTypeMapPanel from './DrawingFlangeTypeMapPanel'
+import PalletArchivePanel from './PalletArchivePanel'
+import PriceSplitArchivePanel from './PriceSplitArchivePanel'
 import {
   buildOrderedColumns,
   DraggableHeaderCell,
@@ -16,6 +25,7 @@ import {
 type ConfirmRow = {
   id: number
   order_no?: string
+  factory_order_no?: string
   status?: string
   material_no: string
   item_no?: number | null
@@ -34,7 +44,10 @@ type MaterialRow = {
   material_no: string
   part_no: string
   drawing_no: string
+  standard_no: string
   spec_model: string
+  spec: string
+  model: string
   material: string
   unit_weight: number
   remark: string
@@ -60,7 +73,10 @@ const materialExportColumns: MaterialExportColumn[] = [
   { key: 'material_no', title: '物料号' },
   { key: 'part_no', title: '料号' },
   { key: 'drawing_no', title: '图纸号' },
+  { key: 'standard_no', title: '标准号' },
   { key: 'spec_model', title: '规格型号' },
+  { key: 'spec', title: '规格' },
+  { key: 'model', title: '型号' },
   { key: 'material', title: '材质' },
   { key: 'unit_weight', title: '单重' },
   { key: 'remark', title: '备注' },
@@ -90,7 +106,10 @@ const emptyMaterialRow = (index: number): MaterialRow => ({
   material_no: '',
   part_no: '',
   drawing_no: '',
+  standard_no: '',
   spec_model: '',
+  spec: '',
+  model: '',
   material: '',
   unit_weight: 0,
   remark: '',
@@ -110,7 +129,10 @@ const materialPasteFields: (keyof MaterialRow)[] = [
   'material_no',
   'part_no',
   'drawing_no',
+  'standard_no',
   'spec_model',
+  'spec',
+  'model',
   'material',
   'unit_weight',
   'remark',
@@ -125,7 +147,10 @@ const materialPasteAliases: Record<string, keyof MaterialRow> = {
   物料号: 'material_no',
   料号: 'part_no',
   图纸号: 'drawing_no',
+  标准号: 'standard_no',
   规格型号: 'spec_model',
+  规格: 'spec',
+  型号: 'model',
   材质: 'material',
   单重: 'unit_weight',
   备注: 'remark',
@@ -138,7 +163,10 @@ const materialPasteAliases: Record<string, keyof MaterialRow> = {
   material_no: 'material_no',
   part_no: 'part_no',
   drawing_no: 'drawing_no',
+  standard_no: 'standard_no',
   spec_model: 'spec_model',
+  spec: 'spec',
+  model: 'model',
   material: 'material',
   unit_weight: 'unit_weight',
   remark: 'remark',
@@ -153,8 +181,27 @@ const materialPasteAliases: Record<string, keyof MaterialRow> = {
 const productionItems = (rows: ConfirmRow[]) =>
   rows.map((r) => ({ id: r.id, material_no: r.material_no, item_no: r.item_no ?? null }))
 
-const EXPERIMENT_ARCHIVING_COLUMN_ORDER_KEY = 'production-experiment-archiving-column-order'
+type TypingSyncResult = {
+  inserted_count?: number
+  updated_count?: number
+  error?: string | null
+}
 
+function showTypingSyncResult(data: { typing?: TypingSyncResult }) {
+  const typing = data.typing
+  if (!typing) return
+  if (typing.error) {
+    message.warning(`打字要求同步失败：${typing.error}`)
+    return
+  }
+  const inserted = typing.inserted_count ?? 0
+  const updated = typing.updated_count ?? 0
+  if (!inserted && !updated) return
+  message.success(`已自动生成打字要求（新增 ${inserted}，更新 ${updated}）`)
+  notifyWorkbenchUnreadChanged()
+}
+
+const EXPERIMENT_ARCHIVING_COLUMN_ORDER_KEY = 'erp_experiment_archiving_column_order'
 const EXPERIMENT_SCROLLABLE_COLUMN_DEFAULT_ORDER = [
   'drawing_no',
   'status',
@@ -266,7 +313,7 @@ function ExperimentalArchiving() {
       return
     }
     const selected = rows.filter((r) => selectedIds.has(r.id))
-    const res = await fetch(apiUrl('/api/v1/workflow/production/batch-apply'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/production/batch-apply'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -284,10 +331,11 @@ function ExperimentalArchiving() {
     await refreshRows()
     setSelectedKeys([])
     message.success(`批量应用成功，更新${data.updated_count}条`)
+    showTypingSyncResult(data)
   }
 
   const submitConfirmRows = async (selected: ConfirmRow[]) => {
-    const res = await fetch(apiUrl('/api/v1/workflow/production/confirm'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/production/confirm'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -302,11 +350,20 @@ function ExperimentalArchiving() {
     }
     await refreshRows()
     setSelectedKeys([])
-    message.success(`建档成功，已转加工${data.updated_count}条`)
+    const noticeSuffix =
+      data.typing?.error
+        ? `；打字要求同步失败：${data.typing.error}`
+        : (Number(data.typing?.inserted_count || 0) || Number(data.typing?.updated_count || 0))
+          ? `；已自动生成打字要求（新增 ${data.typing?.inserted_count ?? 0}，更新 ${data.typing?.updated_count ?? 0}）`
+          : ''
+    message.success(`建档成功，已转加工${data.updated_count}条${noticeSuffix}`)
+    if (!data.typing?.error && (Number(data.typing?.inserted_count || 0) || Number(data.typing?.updated_count || 0))) {
+      notifyWorkbenchUnreadChanged()
+    }
   }
 
   const handleSaveRow = async (record: ConfirmRow) => {
-    const res = await fetch(apiUrl('/api/v1/workflow/orders/detail/update'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/orders/detail/update'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -327,6 +384,7 @@ function ExperimentalArchiving() {
       return
     }
     Modal.success({ title: '保存成功' })
+    showTypingSyncResult(data)
     if (data.row) {
       setRows((prev) =>
         prev.map((r) =>
@@ -373,7 +431,7 @@ function ExperimentalArchiving() {
   }
 
   const handleCopyRow = async (record: ConfirmRow) => {
-    const res = await fetch(apiUrl('/api/v1/workflow/orders/detail/append'), {
+    const res = await authFetch(apiUrl('/api/v1/workflow/orders/detail/append'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -413,11 +471,12 @@ function ExperimentalArchiving() {
     })
     setHighlightedRowId(Number(newRow.id))
     message.success(`已复制一行，新 ID：${newRow.id}`)
+    showTypingSyncResult(data)
   }
 
   const handleDeleteRow = async (record: ConfirmRow) => {
     let hasPackingAssociation = false
-    const checkRes = await fetch(apiUrl(`/api/v1/workflow/orders/detail/${record.id}/delete-check`))
+    const checkRes = await authFetch(apiUrl(`/api/v1/workflow/orders/detail/${record.id}/delete-check`))
     if (checkRes.ok) {
       const checkData = await checkRes.json()
       hasPackingAssociation = !!checkData.has_packing_association
@@ -429,7 +488,7 @@ function ExperimentalArchiving() {
         : `确定删除 order_details 表中 id 为 ${record.id} 的记录吗？`,
       okText: '确认删除',
       onOk: async () => {
-        const res = await fetch(apiUrl(`/api/v1/workflow/orders/detail/${record.id}`), { method: 'DELETE' })
+        const res = await authFetch(apiUrl(`/api/v1/workflow/orders/detail/${record.id}`), { method: 'DELETE' })
         const data = await res.json()
         if (!res.ok) {
           message.error(typeof data.detail === 'string' ? data.detail : data.detail || '删除失败')
@@ -483,6 +542,14 @@ function ExperimentalArchiving() {
         title: '订单号',
         key: 'order_no',
         dataIndex: 'order_no',
+        fixed: 'left' as const,
+        width: 160,
+        render: (v?: string) => v || '-',
+      },
+      {
+        title: '本厂单号',
+        key: 'factory_order_no',
+        dataIndex: 'factory_order_no',
         fixed: 'left' as const,
         width: 160,
         render: (v?: string) => v || '-',
@@ -616,6 +683,47 @@ function ExperimentalArchiving() {
 
   return (
     <div className={styles.stack}>
+        <Collapse
+          className={styles.opGuide}
+          defaultActiveKey={[]}
+          items={[
+            {
+              key: 'guide',
+              label: '操作说明',
+              children: (
+                <div className={styles.opGuideBody}>
+                  <div className={styles.opGuideBlock}>
+                    <div className={styles.opGuideLabel}>操作步骤</div>
+                    <ol className={styles.opGuideList}>
+                      <li>至少填订单号或物料号，可选客户、生产模式，点「加载明细」。</li>
+                      <li>点「智能提取规格/标准」，从规格型号拆出规格、标准，写入表格，可手改。</li>
+                      <li>在步骤 2 填炉号、热处理批号，勾选行后点「批量应用」。</li>
+                      <li>
+                        表格内可改规格、标准、数量、炉号、热处理批号；改完点行内「保存」。拆行用「复制」，误行用「删除」。
+                      </li>
+                      <li>勾选核对无误的行，点「确认建档并转加工」，这些行状态变为「加工」。</li>
+                      <li>状态已是「加工」的行，勾选后点「入库」。</li>
+                    </ol>
+                  </div>
+                  <div className={styles.opGuideBlock}>
+                    <div className={styles.opGuideLabel}>注意事项</div>
+                    <ul className={`${styles.opGuideList} ${styles.opGuideNotes}`}>
+                      <li>定位一行用订单号 + 物料号 + 条目。</li>
+                      <li>规格、标准、炉号、热处理批号允许为空；确认建档时若有空值会二次确认，不硬拦。</li>
+                      <li>「确认建档并转加工」和「入库」只处理勾选行。</li>
+                      <li>
+                        单行保存、批量应用炉号/热处理批号、复制明细，以及「确认建档并转加工」时，若数量/炉号/热处理批号有填入或变动且与打字要求未对齐，会自动生成或更新对应打字要求（一条订单明细对应一条，手工改过的字段会保留）。该明细的上传者和更新者会在工作台收到提醒，确认后可跳转查看。
+                      </li>
+                      <li>入库必须是「加工」状态。</li>
+                      <li>删除已关联装箱数据的明细会同步清除对应装箱记录。</li>
+                      <li>移动端建议横屏查看表格。</li>
+                    </ul>
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        />
         <Form form={form} layout="vertical" className={styles.stackForm}>
           <Card size="small" title={<Tag color="blue">步骤1：加载待处理订单</Tag>} className={styles.sectionCard}>
             <div className={styles.stack}>
@@ -688,7 +796,7 @@ function ExperimentalArchiving() {
             rowKey="id"
             columns={columns}
             dataSource={rows}
-            scroll={{ x: 1980 }}
+            scroll={{ x: 2140 }}
             components={{
               header: {
                 cell: (props: DraggableHeaderCellProps) => (
@@ -717,6 +825,9 @@ type MaterialApiRow = Omit<MaterialRow, 'key'> & { id: number }
 const materialRowFromApi = (row: MaterialApiRow): MaterialRow => ({
   ...row,
   key: String(row.id),
+  standard_no: row.standard_no || '',
+  spec: row.spec || '',
+  model: row.model || '',
   unit_weight: Number(row.unit_weight || 0),
   ut: row.ut || '',
   mt: row.mt || '',
@@ -747,6 +858,8 @@ const parseMaterialPasteRows = (text: string, startIndex: number): MaterialRow[]
         row.unit_weight = Number(cell || 0)
       } else if (field === 'product_unit_price' || field === 'france_agreement_price' || field === 'dalian_agreement_price') {
         row[field] = Number(cell || 0)
+      } else if (field === 'drawing_no') {
+        row.drawing_no = normalizeDrawingInput(cell)
       } else {
         row[field] = cell as never
       }
@@ -767,6 +880,7 @@ function MaterialArchiving() {
   const [exportColumnKeys, setExportColumnKeys] = useState<string[]>(
     materialExportColumns.map((col) => col.key)
   )
+  const [aligning, setAligning] = useState(false)
 
   useEffect(() => {
     const script = document.createElement('script')
@@ -805,6 +919,20 @@ function MaterialArchiving() {
     setRows((prev) => prev.map((row) => (row.key === key ? { ...row, [field]: value } : row)))
   }
 
+  const handleConfirmAlign = async () => {
+    setAligning(true)
+    try {
+      const data = await confirmMaterialAlign()
+      showAlignConfirmResult(data)
+      notifyWorkbenchUnreadChanged()
+      await loadMaterials()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '对齐失败')
+    } finally {
+      setAligning(false)
+    }
+  }
+
   const handleApplyPaste = () => {
     const pastedRows = parseMaterialPasteRows(pasteText, rows.length)
     if (!pastedRows.length) {
@@ -826,7 +954,10 @@ function MaterialArchiving() {
     const res = await fetch(apiUrl('/api/v1/workflow/materials/submit'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows: validRows, updated_by: 'system' }),
+      body: JSON.stringify({
+        rows: validRows.map((row) => ({ ...row, drawing_no: normalizeDrawingInput(row.drawing_no) })),
+        updated_by: 'system',
+      }),
     })
     const data = await res.json()
     if (!res.ok) {
@@ -951,7 +1082,19 @@ function MaterialArchiving() {
 
   const renderReadonlyOrInput = (record: MaterialRow, value: string, field: keyof MaterialRow, width?: number) => {
     if (!editingKeys.has(record.key)) return value || '-'
-    return <Input value={value} style={width ? { width } : undefined} onChange={(e) => updateMaterialRow(record.key, field, e.target.value)} />
+    return (
+      <Input
+        value={value}
+        style={width ? { width } : undefined}
+        placeholder={field === 'drawing_no' ? 'A5E02970605A Rev017 或 A5E02970605A-017' : undefined}
+        onChange={(e) => updateMaterialRow(record.key, field, e.target.value)}
+        onBlur={
+          field === 'drawing_no'
+            ? (e) => updateMaterialRow(record.key, field, normalizeDrawingInput(e.target.value))
+            : undefined
+        }
+      />
+    )
   }
 
   const materialColumns = [
@@ -975,10 +1118,28 @@ function MaterialArchiving() {
       render: (value: string, record: MaterialRow) => renderReadonlyOrInput(record, value, 'drawing_no'),
     },
     {
+      title: '标准号',
+      dataIndex: 'standard_no',
+      width: 140,
+      render: (value: string, record: MaterialRow) => renderReadonlyOrInput(record, value, 'standard_no'),
+    },
+    {
       title: '规格型号',
       dataIndex: 'spec_model',
       width: 220,
       render: (value: string, record: MaterialRow) => renderReadonlyOrInput(record, value, 'spec_model'),
+    },
+    {
+      title: '规格',
+      dataIndex: 'spec',
+      width: 100,
+      render: (value: string, record: MaterialRow) => renderReadonlyOrInput(record, value, 'spec'),
+    },
+    {
+      title: '型号',
+      dataIndex: 'model',
+      width: 100,
+      render: (value: string, record: MaterialRow) => renderReadonlyOrInput(record, value, 'model'),
     },
     {
       title: '材质',
@@ -1132,7 +1293,7 @@ function MaterialArchiving() {
               style={{ width: 220 }}
             />
             <Input
-              placeholder="输入图纸号查询"
+              placeholder="A5E02970605A Rev017 或 A5E02970605A-017"
               value={queryDrawingNo}
               onChange={(e) => setQueryDrawingNo(e.target.value)}
               style={{ width: 220 }}
@@ -1162,6 +1323,9 @@ function MaterialArchiving() {
             <Tag color="blue">物料表</Tag>
             <Button type="primary" onClick={() => void handleSaveAll()}>
               保存全部
+            </Button>
+            <Button type="primary" loading={aligning} onClick={() => void handleConfirmAlign()}>
+              确认对齐
             </Button>
             {submitStatus ? (
               <Tag color={submitStatus.startsWith('保存失败') ? 'red' : submitStatus === '保存中...' ? 'blue' : 'green'}>{submitStatus}</Tag>
@@ -1205,16 +1369,24 @@ function MaterialArchiving() {
 }
 
 export default function ProductionPage() {
+  const { pathname } = useLocation()
+  const pageTitle = usePageTitle()
+  let content = <ExperimentalArchiving />
+  if (pathname.endsWith('/materials')) {
+    content = <MaterialArchiving />
+  } else if (pathname.endsWith('/drawings')) {
+    content = <DrawingArchivePanel />
+  } else if (pathname.endsWith('/drawing-flange-types')) {
+    content = <DrawingFlangeTypeMapPanel />
+  } else if (pathname.endsWith('/price-split')) {
+    content = <PriceSplitArchivePanel />
+  } else if (pathname.endsWith('/pallets')) {
+    content = <PalletArchivePanel />
+  }
+
   return (
-    <Card title="产品建档" className={styles.pageCard}>
-      <Tabs
-        defaultActiveKey="experiment"
-        items={[
-          { key: 'experiment', label: '实验建档', children: <ExperimentalArchiving /> },
-          { key: 'materials', label: '物料建档', children: <MaterialArchiving /> },
-          { key: 'drawings', label: '图纸建档', children: <DrawingArchivePanel /> },
-        ]}
-      />
+    <Card title={pageTitle} className={styles.pageCard}>
+      {content}
     </Card>
   )
 }

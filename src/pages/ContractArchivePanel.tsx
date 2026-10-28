@@ -7,6 +7,7 @@ import {
   DatePicker,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Space,
@@ -23,6 +24,8 @@ import { authFetch, getStoredUser } from '../utils/auth'
 import { saveGeneratedBlob, getDownloadFileName } from '../utils/clientFileSave'
 import { message } from '../utils/feedback'
 import { askSavePathAndFileName } from '../utils/savePath'
+import { notifyWorkbenchUnreadChanged } from '../layout/WorkbenchUnreadContext'
+import { isDalianContractCustomer } from '../utils/customerRegion'
 
 type ArchiveRow = {
   id: number
@@ -30,18 +33,41 @@ type ArchiveRow = {
   file_name: string
   version: string
   upload_date: string
+  uploaded_by_user_id?: number | null
   uploaded_by_name: string
   updated_date: string
+  updated_by_user_id?: number | null
   updated_by_name: string
   summary?: string | null
   owner_user_id?: number | null
   owner_name?: string | null
+  progress_status?: string | null
+  assigned_at?: string | null
+  total_amount?: number | string | null
 }
 
 type UserOption = { id: number; name: string; username: string }
 
 const VERSION_TIP = '格式：V主版本.次版本.修订号，例如 V0.0.0；版本更新时默认末位 +1，可手改。'
 const ACCEPT_TYPES = '.pdf,.xlsx,.xls'
+const CHAIRMAN_ROLE_CODE = 'super_admin'
+
+function canDeleteOwnedRow(
+  row: { uploaded_by_user_id?: number | null; updated_by_user_id?: number | null },
+  userId?: number,
+  roleCode?: string,
+) {
+  if (roleCode === CHAIRMAN_ROLE_CODE) return true
+  if (!userId) return false
+  return userId === row.uploaded_by_user_id || userId === row.updated_by_user_id
+}
+
+function formatAmount(v: number | string | null | undefined): string {
+  if (v == null || v === '') return '-'
+  const n = Number(v)
+  if (Number.isNaN(n)) return '-'
+  return n.toFixed(2)
+}
 
 function bumpVersion(version: string): string {
   const raw = (version || 'V0.0.0').trim()
@@ -103,6 +129,11 @@ export default function ContractArchivePanel() {
   const [versionTarget, setVersionTarget] = useState<ArchiveRow | null>(null)
   const [versionFileList, setVersionFileList] = useState<UploadFile[]>([])
   const [versionPendingFile, setVersionPendingFile] = useState<File | null>(null)
+  const uploadCustomerName = Form.useWatch('customer_name', uploadForm)
+  const metaCustomerName = Form.useWatch('customer_name', metaForm)
+  const uploadAmountRequired = !isDalianContractCustomer(uploadCustomerName)
+  const metaAmountRequired = !isDalianContractCustomer(metaCustomerName)
+  const versionAmountRequired = !isDalianContractCustomer(versionTarget?.customer_name)
 
   const loadCustomers = useCallback(async (q = '') => {
     const res = await authFetch(apiUrl(`/api/v1/contract-archives/customers/suggest?q=${encodeURIComponent(q)}&limit=30`))
@@ -189,6 +220,9 @@ export default function ContractArchivePanel() {
       fd.append('upload_date', toYmd(values.upload_date))
       // 首次上传不填更新时间，后端存空
       if (values.summary) fd.append('summary', values.summary)
+      if (values.total_amount != null && values.total_amount !== '') {
+        fd.append('total_amount', String(values.total_amount))
+      }
       fd.append('file', pendingFile)
       const res = await authFetch(apiUrl('/api/v1/contract-archives'), { method: 'POST', body: fd })
       const data = await readJson<{ item?: ArchiveRow; owner_assigned?: boolean; detail?: unknown }>(res)
@@ -199,7 +233,13 @@ export default function ContractArchivePanel() {
       message.success('合同上传已完成')
       setPendingFile(null)
       setFileList([])
-      uploadForm.setFieldsValue({ summary: undefined, version: 'V0.0.0', upload_date: dayjs(), customer_name: undefined })
+      uploadForm.setFieldsValue({
+        summary: undefined,
+        version: 'V0.0.0',
+        upload_date: dayjs(),
+        customer_name: undefined,
+        total_amount: undefined,
+      })
       await loadList()
       await loadUnassigned()
       await loadCustomers(values.customer_name)
@@ -231,6 +271,7 @@ export default function ContractArchivePanel() {
     message.success('业务负责人已指定')
     setOwnerModalOpen(false)
     setSelectedUnassigned([])
+    notifyWorkbenchUnreadChanged()
     await loadList()
     await loadUnassigned()
   }
@@ -256,6 +297,29 @@ export default function ContractArchivePanel() {
     Modal.success({ title: '下载完成', content: saved ? `已保存至：${saved}` : '文件已下载' })
   }
 
+  const handleDelete = (row: ArchiveRow) => {
+    Modal.confirm({
+      title: '确认删除该合同？',
+      content: `将删除合同记录及已上传文件：${row.file_name}`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const res = await authFetch(apiUrl(`/api/v1/contract-archives/${row.id}`), { method: 'DELETE' })
+        const data = await readJson<{ detail?: unknown }>(res)
+        if (!res.ok) {
+          message.error(parseApiDetail(data))
+          return
+        }
+        message.success('已删除合同及文件')
+        setRows((prev) => prev.filter((r) => r.id !== row.id))
+        setUnassigned((prev) => prev.filter((r) => r.id !== row.id))
+        setSelectedUnassigned((prev) => prev.filter((id) => id !== row.id))
+        notifyWorkbenchUnreadChanged()
+      },
+    })
+  }
+
   const openMetaEdit = (row: ArchiveRow) => {
     setMetaTarget(row)
     metaForm.setFieldsValue({
@@ -264,6 +328,7 @@ export default function ContractArchivePanel() {
       upload_date: dayjs(row.upload_date),
       updated_date: row.updated_date ? dayjs(row.updated_date) : undefined,
       owner_user_id: row.owner_user_id || undefined,
+      total_amount: row.total_amount == null || row.total_amount === '' ? undefined : Number(row.total_amount),
     })
     setMetaModalOpen(true)
   }
@@ -279,6 +344,8 @@ export default function ContractArchivePanel() {
           summary: values.summary || '',
           upload_date: toYmd(values.upload_date),
           updated_date: values.updated_date ? toYmd(values.updated_date) : '',
+          total_amount:
+            values.total_amount == null || values.total_amount === '' ? null : values.total_amount,
         }
         if (values.owner_user_id) body.owner_user_id = values.owner_user_id
         else body.clear_owner = true
@@ -294,6 +361,7 @@ export default function ContractArchivePanel() {
         }
         message.success('已更新')
         setMetaModalOpen(false)
+        notifyWorkbenchUnreadChanged()
         await loadList()
         await loadUnassigned()
       },
@@ -314,6 +382,7 @@ export default function ContractArchivePanel() {
           version: bumpVersion(row.version),
           updated_date: dayjs(),
           summary: row.summary || '',
+          total_amount: row.total_amount == null || row.total_amount === '' ? undefined : Number(row.total_amount),
         })
         setVersionModalOpen(true)
       },
@@ -331,6 +400,7 @@ export default function ContractArchivePanel() {
     fd.append('version', values.version.trim())
     fd.append('updated_date', toYmd(values.updated_date))
     if (values.summary != null) fd.append('summary', values.summary)
+    if (values.total_amount != null) fd.append('total_amount', String(values.total_amount))
     fd.append('file', versionPendingFile)
     const res = await authFetch(apiUrl(`/api/v1/contract-archives/${versionTarget.id}/versions`), {
       method: 'POST',
@@ -343,23 +413,33 @@ export default function ContractArchivePanel() {
     }
     message.success('合同版本已更新')
     setVersionModalOpen(false)
+    notifyWorkbenchUnreadChanged()
     await loadList()
     await loadUnassigned()
   }
 
   const archiveColumns: ColumnsType<ArchiveRow> = useMemo(
     () => [
-      { title: '客户名', dataIndex: 'customer_name', width: 200 },
+      { title: '客户名', dataIndex: 'customer_name', width: 240, fixed: 'left', ellipsis: false },
       {
         title: '合同附件',
         dataIndex: 'file_name',
+        width: 320,
+        fixed: 'left',
+        ellipsis: false,
         render: (name: string, row) => (
-          <Button type="link" size="small" onClick={() => void handleDownload(row)}>
+          <Button type="link" size="small" className="contract-full-name-link" onClick={() => void handleDownload(row)}>
             {name}
           </Button>
         ),
       },
       { title: '版本号', dataIndex: 'version', width: 100 },
+      {
+        title: '合同总金额',
+        dataIndex: 'total_amount',
+        width: 130,
+        render: (v: number | string | null) => formatAmount(v),
+      },
       {
         title: '合同概述',
         dataIndex: 'summary',
@@ -383,9 +463,19 @@ export default function ContractArchivePanel() {
         render: (v: string | null) => v || <Tag>未指定</Tag>,
       },
       {
+        title: '进度状态',
+        dataIndex: 'progress_status',
+        width: 90,
+        render: (v: string | null) => {
+          const s = v || '上传'
+          const color = s === '确认' ? 'success' : s === '分配' ? 'orange' : s === '修改' ? 'gold' : 'default'
+          return <Tag color={color}>{s}</Tag>
+        },
+      },
+      {
         title: '操作',
         key: 'action',
-        width: 220,
+        width: 260,
         fixed: 'right',
         render: (_, row) => (
           <Space size={0} wrap>
@@ -398,11 +488,16 @@ export default function ContractArchivePanel() {
             <Button type="link" size="small" onClick={() => void handleDownload(row)}>
               下载
             </Button>
+            {canDeleteOwnedRow(row, currentUser?.id, currentUser?.role_code) ? (
+              <Button type="link" size="small" danger onClick={() => handleDelete(row)}>
+                删除
+              </Button>
+            ) : null}
           </Space>
         ),
       },
     ],
-    []
+    [currentUser]
   )
 
   const unassignedColumns: ColumnsType<ArchiveRow> = useMemo(
@@ -415,15 +510,22 @@ export default function ContractArchivePanel() {
       {
         title: '操作',
         key: 'action',
-        width: 120,
+        width: 180,
         render: (_, row) => (
-          <Button type="link" size="small" onClick={() => openOwnerModal([row.id])}>
-            指定负责人
-          </Button>
+          <Space size={0} wrap>
+            <Button type="link" size="small" onClick={() => openOwnerModal([row.id])}>
+              指定负责人
+            </Button>
+            {canDeleteOwnedRow(row, currentUser?.id, currentUser?.role_code) ? (
+              <Button type="link" size="small" danger onClick={() => handleDelete(row)}>
+                删除
+              </Button>
+            ) : null}
+          </Space>
         ),
       },
     ],
-    []
+    [currentUser]
   )
 
   return (
@@ -495,7 +597,23 @@ export default function ContractArchivePanel() {
             </Form.Item>
           </div>
           <div className="contract-form-row">
-            <Form.Item name="summary" label="合同概述" style={{ flex: 1, maxWidth: 720 }}>
+            <Form.Item
+              name="total_amount"
+              label="合同总金额"
+              rules={uploadAmountRequired ? [{ required: true, message: '请填入合同总金额' }] : []}
+            >
+              <InputNumber
+                min={0}
+                precision={2}
+                style={{ width: 180 }}
+                placeholder={uploadAmountRequired ? '0.00' : '非必填'}
+              />
+            </Form.Item>
+            <Form.Item
+              name="summary"
+              label="合同概述"
+              style={{ flex: 1, maxWidth: 720 }}
+            >
               <Input.TextArea rows={2} placeholder="非必填" />
             </Form.Item>
           </div>
@@ -618,7 +736,7 @@ export default function ContractArchivePanel() {
         rowKey="id"
         columns={archiveColumns}
         dataSource={rows}
-        scroll={{ x: 1400 }}
+        scroll={{ x: 1960 }}
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
       />
 
@@ -655,6 +773,18 @@ export default function ContractArchivePanel() {
         <Form form={metaForm} layout="vertical">
           <Form.Item name="customer_name" label="客户名" rules={[{ required: true }]}>
             <Input />
+          </Form.Item>
+          <Form.Item
+            name="total_amount"
+            label="合同总金额"
+            rules={metaAmountRequired ? [{ required: true, message: '请填入合同总金额' }] : []}
+          >
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: '100%' }}
+              placeholder={metaAmountRequired ? '0.00' : '非必填'}
+            />
           </Form.Item>
           <Form.Item name="summary" label="合同概述">
             <Input.TextArea rows={3} />
@@ -718,6 +848,18 @@ export default function ContractArchivePanel() {
             >
               <Button>选择文件</Button>
             </Upload>
+          </Form.Item>
+          <Form.Item
+            name="total_amount"
+            label="合同总金额"
+            rules={versionAmountRequired ? [{ required: true, message: '请填入合同总金额' }] : []}
+          >
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: '100%' }}
+              placeholder={versionAmountRequired ? '0.00' : '非必填'}
+            />
           </Form.Item>
           <Form.Item name="summary" label="合同概述">
             <Input.TextArea rows={2} />

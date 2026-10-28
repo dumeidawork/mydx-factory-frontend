@@ -1,5 +1,6 @@
 import type React from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { Button, Card, Form, Input, Space, Table, Tabs } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { apiUrl } from '../utils/api'
@@ -7,14 +8,23 @@ import { authFetch } from '../utils/auth'
 import { getDownloadFileName, saveGeneratedBlob } from '../utils/clientFileSave'
 import { message } from '../utils/feedback'
 import { askSavePathAndFileName } from '../utils/savePath'
+import { usePageTitle } from '../layout/usePageTitle'
+import PaintRequirementPanel from './PaintRequirementPanel'
+import DnInchMapPanel from './DnInchMapPanel'
+import MaterialTypingMapPanel from './MaterialTypingMapPanel'
+import QrLabelDesignPanel from './QrLabelDesignPanel'
+import TypingRequirementPanel from './TypingRequirementPanel'
 import styles from './WorkflowPages.module.css'
 
 type DrawingRow = {
   id: number
   customer_code: string
   drawing_no: string
+  standard_no?: string
+  drawing_rev_no?: string
   material: string
   spec_model: string
+  material_no?: string
   drawing_type: string
   drawing_name: string
   uploaded_at: string
@@ -54,6 +64,7 @@ function DrawingDownloadPanel() {
   const [nameLoading, setNameLoading] = useState(false)
   const [orderLoading, setOrderLoading] = useState(false)
   const [batchLoading, setBatchLoading] = useState(false)
+  const [factoryOrderNo, setFactoryOrderNo] = useState('')
 
   const handleDownload = async (row: DrawingRow) => {
     const fileName = `${row.drawing_name}.pdf`
@@ -98,12 +109,18 @@ function DrawingDownloadPanel() {
     try {
       const qs = new URLSearchParams({ order_no: values.order_no.trim() })
       const res = await authFetch(apiUrl(`/api/v1/drawing-archives/by-order?${qs.toString()}`))
-      const data = await readJson<{ items?: DrawingRow[]; message?: string; detail?: unknown }>(res)
+      const data = await readJson<{
+        items?: DrawingRow[]
+        factory_order_no?: string
+        message?: string
+        detail?: unknown
+      }>(res)
       if (!res.ok) {
         message.error(parseApiDetail(data))
         return
       }
       setOrderRows(data.items || [])
+      setFactoryOrderNo(String(data.factory_order_no || '').trim())
       setSelectedKeys([])
       if (data.message) message.info(data.message)
       else if (!(data.items || []).length) message.info('未查询到图纸')
@@ -121,7 +138,7 @@ function DrawingDownloadPanel() {
     const now = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
     const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-    const zipName = orderNo ? `${orderNo}_dr_${stamp}.zip` : `dr_${stamp}.zip`
+    const zipName = `【DR】${orderNo}_${factoryOrderNo}_${stamp}.zip`
     const saveInfo = await askSavePathAndFileName('批量下载图纸', '', zipName, {
       forceXlsx: false,
       okText: '确认下载',
@@ -153,9 +170,11 @@ function DrawingDownloadPanel() {
 
   const baseColumns: ColumnsType<DrawingRow> = [
     { title: '客户代码', dataIndex: 'customer_code', width: 100 },
-    { title: '标准号/图纸号-版本号', dataIndex: 'drawing_no', width: 160 },
+    { title: '标准号', dataIndex: 'standard_no', width: 120, render: (v?: string) => v || '-' },
+    { title: '图纸号-版本号', dataIndex: 'drawing_rev_no', width: 180, render: (v?: string) => v || '-' },
     { title: '材质', dataIndex: 'material', width: 100 },
-    { title: '规格型号/物料号', dataIndex: 'spec_model', width: 140 },
+    { title: '规格型号', dataIndex: 'spec_model', width: 140 },
+    { title: '物料号', dataIndex: 'material_no', width: 120, render: (v?: string) => v || '-' },
     { title: '类型', dataIndex: 'drawing_type', width: 100 },
     { title: '图纸名', dataIndex: 'drawing_name', width: 260 },
     { title: '上传时间', dataIndex: 'uploaded_at', width: 160 },
@@ -196,7 +215,7 @@ function DrawingDownloadPanel() {
           size="small"
           columns={baseColumns}
           dataSource={nameRows}
-          scroll={{ x: 1300 }}
+          scroll={{ x: 1600 }}
           pagination={false}
         />
       </Card>
@@ -223,7 +242,7 @@ function DrawingDownloadPanel() {
           size="small"
           columns={baseColumns}
           dataSource={orderRows}
-          scroll={{ x: 1300 }}
+          scroll={{ x: 1600 }}
           rowSelection={{
             selectedRowKeys: selectedKeys,
             onChange: (keys) => setSelectedKeys(keys),
@@ -235,34 +254,42 @@ function DrawingDownloadPanel() {
   )
 }
 
-export default function ManufacturingPage() {
+function TypingRequirementTabs() {
+  const [searchParams] = useSearchParams()
+  const [activeKey, setActiveKey] = useState('typing')
+  useEffect(() => {
+    if (searchParams.get('order_no') || searchParams.get('detail_ids')) {
+      setActiveKey('typing')
+    }
+  }, [searchParams])
   return (
-    <Card title="生产" className={styles.pageCard}>
-      <Tabs
-        defaultActiveKey="drawing-download"
-        items={[
-          {
-            key: 'plan',
-            label: '生产计划',
-            children: <EmptyPlaceholder text="生产计划功能待开发..." />,
-          },
-          {
-            key: 'order-split',
-            label: '订单分割',
-            children: <EmptyPlaceholder text="订单分割功能待开发..." />,
-          },
-          {
-            key: 'drawing-download',
-            label: '图纸下载',
-            children: <DrawingDownloadPanel />,
-          },
-          {
-            key: 'typing',
-            label: '打字要求',
-            children: <EmptyPlaceholder text="打字要求功能待开发..." />,
-          },
-        ]}
-      />
+    <Tabs
+      activeKey={activeKey}
+      onChange={setActiveKey}
+      items={[
+        { key: 'typing', label: '打字要求', children: <TypingRequirementPanel /> },
+        { key: 'qr-label', label: '二维码标签设计', children: <QrLabelDesignPanel /> },
+        { key: 'paint', label: '划漆要求', children: <PaintRequirementPanel /> },
+        { key: 'dn-inch', label: 'DN值-英寸', children: <DnInchMapPanel /> },
+        { key: 'material-typing', label: '材质-打字材质', children: <MaterialTypingMapPanel /> },
+      ]}
+    />
+  )
+}
+
+export default function ManufacturingPage() {
+  const { pathname } = useLocation()
+  const pageTitle = usePageTitle()
+  let content = <DrawingDownloadPanel />
+  if (pathname.endsWith('/plan')) {
+    content = <EmptyPlaceholder text="生产计划功能待开发..." />
+  } else if (pathname.endsWith('/typing')) {
+    content = <TypingRequirementTabs />
+  }
+
+  return (
+    <Card title={pageTitle} className={styles.pageCard}>
+      {content}
     </Card>
   )
 }

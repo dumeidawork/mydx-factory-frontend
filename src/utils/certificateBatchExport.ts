@@ -18,6 +18,7 @@ export type BatchCertificateConfig = {
   useUtmtpt: boolean
   saveDirectory: string
   dateText: string
+  dateTextForRow?: (row: BatchCertificateRow) => string
   generateUrl: string
   fetchDetail: (
     orderNo: string,
@@ -94,7 +95,7 @@ async function generateWordForRow(
       config.buildSaveBody({
         row,
         detail,
-        dateText: config.dateText,
+        dateText: config.dateTextForRow?.(row) || config.dateText,
         orderDetailId,
         orderNo,
         materialNo,

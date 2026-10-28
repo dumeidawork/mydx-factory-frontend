@@ -7,6 +7,7 @@ import jaJP from 'antd/locale/ja_JP'
 import './i18n'
 import App from './App'
 import './index.css'
+import { ColorThemeProvider, useColorTheme } from './theme/ThemeProvider'
 import { installGlobalFetchGuard } from './utils/api'
 import { installGlobalActionErrorDialog } from './utils/feedback'
 import { installGlobalTableColumnResize } from './utils/resizableTables'
@@ -21,6 +22,15 @@ const antdLocales: Record<string, typeof zhCN> = {
   'ja-JP': jaJP,
 }
 
+function ThemedApp({ lang }: { lang: string }) {
+  const { antdTheme } = useColorTheme()
+  return (
+    <ConfigProvider locale={antdLocales[lang] || zhCN} theme={antdTheme}>
+      <App />
+    </ConfigProvider>
+  )
+}
+
 function Root() {
   const [lang, setLang] = React.useState(() => {
     return localStorage.getItem('erp_lang') || 'zh-CN'
@@ -31,9 +41,9 @@ function Root() {
     return () => window.removeEventListener('languageChange', handler)
   }, [])
   return (
-    <ConfigProvider locale={antdLocales[lang] || zhCN}>
-      <App />
-    </ConfigProvider>
+    <ColorThemeProvider>
+      <ThemedApp lang={lang} />
+    </ColorThemeProvider>
   )
 }
 
